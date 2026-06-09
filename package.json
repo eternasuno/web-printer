@@ -6,7 +6,8 @@
     "typescript": "^6.0.3",
     "vite": "latest",
     "vite-plugin-monkey": "latest",
-    "vitest": "latest"
+    "vitest": "latest",
+    "@biomejs/biome": "^2.4.14"
   },
   "name": "web-printer",
   "packageManager": "pnpm@11.1.0",
