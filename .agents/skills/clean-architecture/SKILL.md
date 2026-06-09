@@ -11,9 +11,9 @@ description: Architecture guidelines for project structure. Use when designing n
 
 ```
 Gateway ─depends on─▶ Usecase ─depends on─▶ Port ─depends on─▶ Entity
-    │                        ▲
-    │                        │ implements
-    └──depends on──▶ Adapter ─┘
+    │                                        ▲
+    │                                        │ implements
+    └──depends on──▶ Adapter ────────────────┘
                         │
                         └──depends on──▶ Infrastructure
 ```
