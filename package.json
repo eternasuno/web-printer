@@ -1,17 +1,4 @@
 {
-  "name": "web-printer",
-  "type": "module",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "dev": "vite build && vite preview",
-    "build": "vite build",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "lint": "biome check src/ test/",
-    "lint:fix": "biome check --write src/ test/",
-    "typecheck": "tsc --noEmit"
-  },
   "devDependencies": {
     "@mozilla/readability": "latest",
     "@types/tampermonkey": "latest",
@@ -20,5 +7,19 @@
     "vite": "latest",
     "vite-plugin-monkey": "latest",
     "vitest": "latest"
-  }
+  },
+  "name": "web-printer",
+  "packageManager": "pnpm@11.1.0",
+  "private": true,
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build && vite preview",
+    "lint": "biome check src/ test/",
+    "lint:fix": "biome check --write src/ test/",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "type": "module",
+  "version": "0.1.0"
 }
