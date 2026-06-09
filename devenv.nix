@@ -9,7 +9,15 @@
     };
   };
 
-  packages = with pkgs; [
-    biome
-  ];
+  devcontainer = {
+    enable = true;
+    settings = {
+      customizations.vscode.extensions = [
+        "biomejs.biome"
+        "eamodio.gitlens"
+        "mkhl.direnv"
+        "supermaven.supermaven"
+      ];
+    };
+  };
 }

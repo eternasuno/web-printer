@@ -11,19 +11,19 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: pnpm/action-setup@v4
+      - uses: cachix/install-nix-action@v31
 
-      - uses: actions/setup-node@v4
+      - uses: cachix/cachix-action@v16
         with:
-          node-version-file: .node-version
-          cache: pnpm
+          name: devenv
 
-      - run: pnpm install --frozen-lockfile
+      - name: Install devenv.sh
+        run: nix profile add nixpkgs#devenv
 
-      - run: pnpm run lint
-
-      - run: pnpm run typecheck
-
-      - run: pnpm run test
+      - shell: devenv shell bash -- -e {0}
+        run: |
+          pnpm run lint
+          pnpm run typecheck
+          pnpm run test
