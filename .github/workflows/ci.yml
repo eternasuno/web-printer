@@ -22,6 +22,18 @@ jobs:
       - name: Install devenv.sh
         run: nix profile add nixpkgs#devenv
 
+      - name: Cache devenv environment
+        uses: actions/cache@v4
+        with:
+          path: .devenv
+          key: devenv-${{ runner.os }}-${{ hashFiles('devenv.nix', 'devenv.yaml', 'devenv.lock') }}
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node_modules-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
       - shell: devenv shell bash -- -e {0}
         run: |
           pnpm run lint
