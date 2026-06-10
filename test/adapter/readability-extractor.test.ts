@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createReadabilityExtractor } from '../../src/adapter/readability-extractor';
-import type { FetchResult } from '../../src/core/entity';
 
 vi.mock('@mozilla/readability', () => {
   const Readability = class {
@@ -17,29 +16,18 @@ vi.mock('@mozilla/readability', () => {
   return { default: Readability, Readability };
 });
 
-describe('extractPages', () => {
-  it('extracts content from fetch results', () => {
-    const pages: FetchResult[] = [
-      {
-        html: '<html><body><h1>Test</h1><p>Content</p></body></html>',
-        ok: true,
-        url: 'https://example.com/page',
-      },
-    ];
-    const result = createReadabilityExtractor().extractPages(pages);
-    expect(result).toHaveLength(1);
-    expect(result[0].title).toBe('Test Title');
-    expect(result[0].html).toBe('<p>Test content</p>');
-    expect(result[0].url).toBe('https://example.com/page');
+describe('extract', () => {
+  it('extracts title and content from HTML', () => {
+    const result = createReadabilityExtractor().extract(
+      '<html><body><h1>Test</h1><p>Content</p></body></html>',
+    );
+    expect(result.title).toBe('Test Title');
+    expect(result.content).toBe('<p>Test content</p>');
   });
 
-  it('skips failed pages', () => {
-    const pages: FetchResult[] = [
-      { html: '<html><body>OK</body></html>', ok: true, url: 'https://example.com/ok' },
-      { error: '404', html: '', ok: false, url: 'https://example.com/fail' },
-    ];
-    const result = createReadabilityExtractor().extractPages(pages);
-    expect(result).toHaveLength(1);
-    expect(result[0].url).toBe('https://example.com/ok');
+  it('throws when no readable content found', () => {
+    expect(() =>
+      createReadabilityExtractor().extract('<html><body></body></html>'),
+    ).toThrow('No readable content found');
   });
 });

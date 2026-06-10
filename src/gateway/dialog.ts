@@ -1,5 +1,5 @@
-import type { LinkInfo } from '../core/entity';
-import { DEFAULT_PRINT_CSS } from '../core/usecase';
+import type { LinkInfo } from '../core/port';
+import { DEFAULT_PRINT_CSS } from './printer';
 
 const escaped = (text: string): string =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

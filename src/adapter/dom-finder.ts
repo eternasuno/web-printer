@@ -1,5 +1,5 @@
-import type { LinkInfo } from '../core/entity';
-import type { LinkFinderPort } from '../core/port';
+import type { LinkInfo } from '../core/port';
+import type { DomPort } from '../core/port';
 
 const isIgnoredHref = (href: string): boolean =>
   !href ||
@@ -19,7 +19,7 @@ const resolveUrl = (href: string): string | null => {
   }
 };
 
-export const createDomFinder = (): LinkFinderPort => ({
+export const createDomFinder = (): DomPort => ({
   findLinks: (selector: string): LinkInfo[] => {
     const anchors = document.querySelectorAll<HTMLAnchorElement>(selector);
     const seen = new Set<string>();

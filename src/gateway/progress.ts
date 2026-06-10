@@ -1,4 +1,8 @@
-import type { ProgressState } from '../core/entity';
+type ProgressState = {
+  done: number;
+  total: number;
+  phase: string;
+};
 
 let _cancelled = false;
 
