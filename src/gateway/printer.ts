@@ -128,7 +128,9 @@ export const openPreview = (html: string): Window | null => {
   const overlay = doc.getElementById('wp-overlay') as HTMLDivElement | null;
   const applyBtn = doc.getElementById('wp-apply') as HTMLButtonElement | null;
 
-  doc.getElementById('wp-print')?.addEventListener('click', () => { win.print(); });
+  doc.getElementById('wp-print')?.addEventListener('click', () => {
+    win.print();
+  });
   doc.getElementById('wp-settings')?.addEventListener('click', () => {
     overlay?.classList.add('active');
     editor?.focus();

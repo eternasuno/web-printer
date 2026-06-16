@@ -93,10 +93,10 @@ describe('openPreview', () => {
 
   it('opens window, writes HTML, and attaches event listeners', () => {
     const mockDoc = {
-      close: vi.fn(),
-      write: vi.fn(),
-      getElementById: vi.fn().mockReturnValue(null),
       addEventListener: vi.fn(),
+      close: vi.fn(),
+      getElementById: vi.fn().mockReturnValue(null),
+      write: vi.fn(),
     };
     const mockWin = { closed: false, document: mockDoc, print: vi.fn() } as unknown as Window;
     vi.spyOn(window, 'open').mockReturnValue(mockWin);

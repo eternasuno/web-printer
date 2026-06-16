@@ -14,8 +14,15 @@ export default defineConfig({
       userscript: {
         author: 'eternasuno',
         connect: ['*'],
-        description: 'Merge all pages from a documentation site into a single HTML and invoke browser print/PDF export',
-        grant: ['GM_xmlhttpRequest', 'GM_registerMenuCommand', 'GM_unregisterMenuCommand', 'GM_getValue', 'GM_setValue'],
+        description:
+          'Merge all pages from a documentation site into a single HTML and invoke browser print/PDF export',
+        grant: [
+          'GM_xmlhttpRequest',
+          'GM_registerMenuCommand',
+          'GM_unregisterMenuCommand',
+          'GM_getValue',
+          'GM_setValue',
+        ],
         match: ['*://*/*'],
         name: 'Web Printer - Document Batch Print Tool',
         namespace: 'https://github.com/eternasuno/web-printer',
