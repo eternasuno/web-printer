@@ -60,3 +60,4 @@ src/
 | `pnpm run test` | Run tests |
 | `pnpm run typecheck` | tsc --noEmit |
 | `pnpm run lint` | Biome check |
+| `pnpm run verify` | lint + typecheck + test (run before committing) |
