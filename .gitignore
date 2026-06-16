@@ -17,3 +17,6 @@ node_modules/
 dist/
 
 tsconfig.tsbuildinfo
+
+# MacOS
+.DS_Store

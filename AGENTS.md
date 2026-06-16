@@ -13,27 +13,29 @@ src/
 ├── core/
 │   ├── entity.ts          # Type definitions
 │   ├── port.ts            # Interface contracts
-│   └── usecase.ts         # Business logic (HTML building, workflow orchestration)
+│   └── usecase.ts         # Business logic (link filtering, article extraction)
 ├── adapter/
-│   ├── dom-finder.ts          # DOM link finder
-│   ├── gm-fetcher.ts          # Page fetcher (GM_xmlhttpRequest)
-│   ├── readability-extractor.ts # Content extractor (Readability)
-│   └── window-printer.ts      # Print window
-├── view/
-│   ├── browser-view.ts # ViewPort implementation
-│   ├── dialog.ts       # Dialog UI (selector input / link list / settings)
-│   ├── progress.ts     # Mini progress bar + cancel
-│   ├── styles.ts       # CSS styles for UI components
-│   └── main.ts         # Entry point (GM menu commands + storage)
+│   ├── dom-finder.ts            # DOM link finder
+│   ├── gm-fetcher.ts            # Page fetcher (GM_xmlhttpRequest)
+│   └── readability-extractor.ts # Content extractor (Readability)
+├── gateway/
+│   ├── dialog.ts    # Dialog UI (selector input / link list / settings)
+│   ├── menu.ts      # GM menu registration
+│   ├── printer.ts   # HTML builder + print window
+│   ├── progress.ts  # Mini progress bar + cancel + toast
+│   ├── storage.ts   # GM_getValue/GM_setValue for custom CSS
+│   ├── styles.ts    # CSS styles for UI components
+│   └── main.ts      # Entry point (wires adapters, gateways, use cases)
 └── readability.d.ts
 ```
 
 ## Flow
 
-1. User clicks "Web Printer" in Tampermonkey menu → selector input dialog
-2. Script discovers matching links, shows selectable list
-3. User selects pages → progress bar → fetch → extract → build HTML → print window
-4. "Web Printer Settings" menu → edit custom print CSS (stored via GM_getValue/GM_setValue)
+1. `init()` → inject styles, init default CSS storage, register GM menu commands
+2. User clicks "Web Printer" → selector input dialog
+3. Script discovers matching links, shows selectable list
+4. User selects pages → progress bar → fetch → extract → build HTML → print window
+5. "Web Printer Settings" → edit custom print CSS (persisted via GM storage)
 
 ## Conventions
 

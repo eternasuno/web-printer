@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Article } from '../../src/core/entity';
-import { buildHtml, printHtml } from '../../src/gateway/printer';
+import { buildHtml, openPreview } from '../../src/gateway/printer';
 
 // ---------------------------------------------------------------------------
 // buildHtml
@@ -53,42 +53,61 @@ describe('buildHtml', () => {
     ]);
     expect(html).toContain('https://example.com/no-title');
   });
+
+  it('includes preview toolbar and settings modal', () => {
+    const html = buildHtml([{ content: '<p>A</p>', title: 'A', url: 'https://example.com/a' }]);
+    expect(html).toContain('wp-toolbar');
+    expect(html).toContain('wp-print');
+    expect(html).toContain('wp-settings');
+    expect(html).toContain('wp-overlay');
+    expect(html).toContain('wp-css-editor');
+    expect(html).toContain('wp-apply');
+  });
+
+  it('includes style tag with id for preview updates', () => {
+    const html = buildHtml([{ content: '<p>A</p>', title: 'A', url: 'https://example.com/a' }]);
+    expect(html).toContain('id="wp-preview-style"');
+  });
+
+  it('escapes CSS content in textarea', () => {
+    const html = buildHtml(
+      [{ content: '<p>A</p>', title: 'A', url: 'https://example.com/a' }],
+      '.test > .item & .other "thing" { color: red; }'
+    );
+    expect(html).toContain('id="wp-css-editor"');
+    expect(html).toContain('.test &gt; .item &amp; .other &quot;thing&quot; { color: red; }');
+  });
 });
 
 // ---------------------------------------------------------------------------
-// printHtml
+// openPreview
 // ---------------------------------------------------------------------------
 
-describe('printHtml', () => {
-  it('returns without error when popup is blocked', async () => {
+describe('openPreview', () => {
+  it('returns null when popup is blocked', () => {
     vi.spyOn(window, 'open').mockReturnValue(null);
-    await expect(printHtml('<html></html>')).resolves.toBeUndefined();
+    const result = openPreview('<html></html>');
+    expect(result).toBeNull();
     vi.restoreAllMocks();
   });
 
-  it('writes HTML to new window and calls print', async () => {
-    vi.useFakeTimers();
-    const mockDoc = { close: vi.fn(), write: vi.fn() };
-    const mockWin = {
-      closed: false,
-      document: mockDoc,
-      focus: vi.fn(),
-      print: vi.fn(),
-    } as unknown as Window & { closed: boolean };
-
+  it('opens window, writes HTML, and attaches event listeners', () => {
+    const mockDoc = {
+      close: vi.fn(),
+      write: vi.fn(),
+      getElementById: vi.fn().mockReturnValue(null),
+      addEventListener: vi.fn(),
+    };
+    const mockWin = { closed: false, document: mockDoc, print: vi.fn() } as unknown as Window;
     vi.spyOn(window, 'open').mockReturnValue(mockWin);
 
-    const promise = printHtml('<html>test</html>');
-
-    await vi.advanceTimersByTimeAsync(500);
+    const result = openPreview('<html>test</html>');
+    expect(result).toBe(mockWin);
     expect(mockDoc.write).toHaveBeenCalledWith('<html>test</html>');
-    expect(mockWin.print).toHaveBeenCalled();
+    expect(mockDoc.close).toHaveBeenCalled();
+    expect(mockDoc.getElementById).toHaveBeenCalled();
+    expect(mockDoc.addEventListener).toHaveBeenCalledWith('keydown', expect.any(Function));
 
-    mockWin.closed = true;
-    await vi.advanceTimersByTimeAsync(600);
-
-    await promise;
-    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 });

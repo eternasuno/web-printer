@@ -1,13 +1,13 @@
 import { createDomFinder } from './adapter/dom-finder';
 import { createGmFetcher } from './adapter/gm-fetcher';
 import { createReadabilityExtractor } from './adapter/readability-extractor';
-import { findLinks, extractArticle } from './core/usecase';
+import { extractArticle, findLinks } from './core/usecase';
 import { promptSelector, promptSettings, selectLinks } from './gateway/dialog';
-import { buildHtml, printHtml, DEFAULT_PRINT_CSS } from './gateway/printer';
 import { registerMenu } from './gateway/menu';
-import { injectStyles } from './gateway/styles';
-import { showProgress, removeProgress, showToast, isCancelled } from './gateway/progress';
+import { buildHtml, DEFAULT_PRINT_CSS, openPreview } from './gateway/printer';
+import { isCancelled, removeProgress, showProgress, showToast } from './gateway/progress';
 import { getCustomCss, initCustomCss, setCustomCss } from './gateway/storage';
+import { injectStyles } from './gateway/styles';
 
 const start = async (): Promise<void> => {
   let lastSelector = '';
@@ -16,7 +16,7 @@ const start = async (): Promise<void> => {
     const selector = await promptSelector(lastSelector || undefined);
     if (selector === null) return;
 
-    const links = findLinks(createDomFinder(), selector);
+    const links = findLinks(selector)(createDomFinder());
     if (links.length === 0) {
       showToast('No matching links found');
       return;
@@ -41,9 +41,13 @@ const start = async (): Promise<void> => {
         return;
       }
       try {
-        const article = await extractArticle(fetcher, extractor, url);
+        const article = await extractArticle(url)({ extractor, fetcher });
         articles.push(article);
-        showProgress({ done: articles.length, phase: 'Processing pages...', total: selected.length });
+        showProgress({
+          done: articles.length,
+          phase: 'Processing pages...',
+          total: selected.length,
+        });
       } catch {
         // Skip failed pages
       }
@@ -58,9 +62,9 @@ const start = async (): Promise<void> => {
     const customCss = getCustomCss(DEFAULT_PRINT_CSS);
     const html = buildHtml(articles, customCss);
 
-    showProgress({ done: 1, phase: 'Opening print window...', total: 1 });
     removeProgress();
-    await printHtml(html);
+    const win = openPreview(html);
+    if (!win) showToast('Popup blocked — please allow popups for this site');
     return;
   }
 };
@@ -77,8 +81,8 @@ const init = (): void => {
   injectStyles();
   initCustomCss(DEFAULT_PRINT_CSS);
   registerMenu({
-    onStart: () => void start(),
     onSettings: () => void openSettings(),
+    onStart: () => void start(),
   });
 };
 

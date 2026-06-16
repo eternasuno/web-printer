@@ -67,51 +67,95 @@ const buildContentBlock = (article: Article, index: number): string =>
 
 export const buildHtml = (articles: Article[], customCss?: string): string => {
   const content = articles.map((article, index) => buildContentBlock(article, index)).join('\n');
+  const css = customCss ?? DEFAULT_PRINT_CSS;
+  const escapedCss = esc(css);
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Merged Document - ${articles.length} pages</title>
-<style>${customCss ?? DEFAULT_PRINT_CSS}</style>
+<style id="wp-preview-style">${css}</style>
+<style>
+/* Preview UI styles - hidden during print */
+.wp-toolbar { position: fixed; top: 12px; right: 12px; z-index: 2147483646; display: flex; gap: 4px; padding: 4px; background: rgba(255,255,255,0.85); backdrop-filter: blur(6px); border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+.wp-toolbar button { width: 36px; height: 36px; border: none; background: none; cursor: pointer; font-size: 20px; display: flex; align-items: center; justify-content: center; border-radius: 6px; }
+.wp-toolbar button:hover { background: rgba(0,0,0,0.08); }
+.wp-overlay { display: none; position: fixed; inset: 0; z-index: 2147483646; background: rgba(0,0,0,0.4); }
+.wp-overlay.active { display: flex; align-items: center; justify-content: center; }
+.wp-settings { background: #fff; border-radius: 12px; padding: 24px; width: 90%; max-width: 720px; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+.wp-settings-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.wp-settings-header h2 { margin: 0; font-size: 16pt; }
+.wp-settings-close { width: 32px; height: 32px; border: none; background: none; cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center; border-radius: 6px; }
+.wp-settings-close:hover { background: rgba(0,0,0,0.08); }
+.wp-settings textarea { width: 100%; height: 50vh; min-height: 200px; font-family: monospace; font-size: 10pt; border: 1px solid #dfe2e5; border-radius: 6px; padding: 12px; resize: vertical; }
+.wp-settings textarea:focus { outline: 2px solid #0366d6; border-color: transparent; }
+.wp-apply { margin-top: 12px; padding: 8px 24px; border: none; background: #0366d6; color: #fff; border-radius: 6px; cursor: pointer; font-size: 11pt; align-self: flex-end; }
+.wp-apply:hover { background: #0257b5; }
+.wp-apply.applied { background: #28a745; }
+@media print { .wp-toolbar, .wp-overlay { display: none !important; } }
+</style>
 </head>
 <body>
+  <div class="wp-toolbar">
+    <button id="wp-print" type="button" title="Print" aria-label="Print">🖨️</button>
+    <button id="wp-settings" type="button" title="Settings" aria-label="Settings">⚙️</button>
+  </div>
+  <div class="wp-overlay" id="wp-overlay">
+    <div class="wp-settings">
+      <div class="wp-settings-header">
+        <h2>Settings</h2>
+        <button class="wp-settings-close" id="wp-settings-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <textarea id="wp-css-editor">${escapedCss}</textarea>
+      <button class="wp-apply" id="wp-apply" type="button">Apply</button>
+    </div>
+  </div>
   <main id="content">${content}</main>
 </body>
 </html>`;
 };
 
-const PRINT_DELAY = 500;
-const POLL_INTERVAL = 500;
-const MAX_WAIT = 60000;
-
-const openWindow = (html: string): Window | null => {
+export const openPreview = (html: string): Window | null => {
   const win = window.open('', '_blank');
   if (!win) return null;
   win.document.write(html);
   win.document.close();
-  return win;
-};
 
-const waitForPrint = (win: Window): Promise<void> =>
-  new Promise((resolve) => {
-    const timer = setInterval(() => {
-      if (win.closed) {
-        clearInterval(timer);
-        resolve();
-      }
-    }, POLL_INTERVAL);
-    setTimeout(() => {
-      clearInterval(timer);
-      resolve();
-    }, MAX_WAIT);
+  const doc = win.document;
+  const style = doc.getElementById('wp-preview-style') as HTMLStyleElement | null;
+  const editor = doc.getElementById('wp-css-editor') as HTMLTextAreaElement | null;
+  const overlay = doc.getElementById('wp-overlay') as HTMLDivElement | null;
+  const applyBtn = doc.getElementById('wp-apply') as HTMLButtonElement | null;
+
+  doc.getElementById('wp-print')?.addEventListener('click', () => { win.print(); });
+  doc.getElementById('wp-settings')?.addEventListener('click', () => {
+    overlay?.classList.add('active');
+    editor?.focus();
+  });
+  doc.getElementById('wp-settings-close')?.addEventListener('click', () => {
+    overlay?.classList.remove('active');
+  });
+  overlay?.addEventListener('click', (e: Event) => {
+    if (e.target === overlay) overlay.classList.remove('active');
+  });
+  doc.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Escape') overlay?.classList.remove('active');
   });
 
-export const printHtml = async (html: string): Promise<void> => {
-  const win = openWindow(html);
-  if (!win) return;
-  await new Promise((r) => setTimeout(r, PRINT_DELAY));
-  win.focus();
-  win.print();
-  await waitForPrint(win);
+  let applyTimer: ReturnType<typeof setTimeout>;
+  applyBtn?.addEventListener('click', () => {
+    if (style && editor) style.textContent = editor.value;
+    if (applyBtn) {
+      applyBtn.textContent = 'Applied';
+      applyBtn.classList.add('applied');
+      clearTimeout(applyTimer);
+      applyTimer = setTimeout(() => {
+        applyBtn.textContent = 'Apply';
+        applyBtn.classList.remove('applied');
+      }, 1500);
+    }
+  });
+
+  return win;
 };

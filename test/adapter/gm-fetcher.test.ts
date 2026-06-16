@@ -19,7 +19,7 @@ const createGmMock = () =>
         } else {
           details.onerror?.({ error: 'Network error' });
         }
-      },
+      }
     );
 
 beforeEach(() => {
@@ -38,14 +38,14 @@ describe('fetchPage', () => {
 
   it('throws on network error', async () => {
     await expect(createGmFetcher().fetchPage('https://example.com/missing')).rejects.toThrow(
-      'Network error',
+      'Network error'
     );
   });
 
   it('throws on HTTP error', async () => {
     mockResponses['https://example.com/404'] = { body: 'Not found', status: 404 };
     await expect(createGmFetcher().fetchPage('https://example.com/404')).rejects.toThrow(
-      'HTTP 404',
+      'HTTP 404'
     );
   });
 });

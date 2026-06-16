@@ -7,6 +7,6 @@ export const createReadabilityExtractor = (): ContentExtractorPort => ({
     const reader = new Readability(doc);
     const article = reader.parse();
     if (!article) throw new Error('No readable content found');
-    return { title: article.title ?? '', content: article.content ?? '' };
+    return { content: article.content ?? '', title: article.title ?? '' };
   },
 });

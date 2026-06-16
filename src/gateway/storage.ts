@@ -3,8 +3,7 @@ declare function GM_setValue(key: string, value: string): void;
 
 const STORAGE_KEY = 'wp-custom-css';
 
-export const getCustomCss = (defaultCss: string): string =>
-  GM_getValue(STORAGE_KEY, defaultCss);
+export const getCustomCss = (defaultCss: string): string => GM_getValue(STORAGE_KEY, defaultCss);
 
 export const setCustomCss = (css: string): void => {
   GM_setValue(STORAGE_KEY, css);

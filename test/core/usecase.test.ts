@@ -16,10 +16,12 @@ const createMockFetcher = (overrides?: Partial<PageFetcherPort>): PageFetcherPor
   ...overrides,
 });
 
-const createMockExtractor = (overrides?: Partial<ContentExtractorPort>): ContentExtractorPort => ({
+const createMockExtractor = (
+  overrides?: Partial<ContentExtractorPort>
+): ContentExtractorPort => ({
   extract: vi
     .fn<ContentExtractorPort['extract']>()
-    .mockReturnValue({ title: 'Test', content: '<p>Test</p>' }),
+    .mockReturnValue({ content: '<p>Test</p>', title: 'Test' }),
   ...overrides,
 });
 
@@ -29,10 +31,10 @@ const createMockExtractor = (overrides?: Partial<ContentExtractorPort>): Content
 
 describe('findLinks', () => {
   it('delegates to DomPort with the given selector', () => {
-    const links = [{ text: 'Intro', url: '/docs/intro' }];
+    const links = [{ text: 'Intro', url: 'https://example.com/docs/intro' }];
     const dom = createMockDom({ findLinks: vi.fn().mockReturnValue(links) });
 
-    const result = findLinks(dom, 'nav a');
+    const result = findLinks('nav a')(dom);
 
     expect(result).toEqual(links);
     expect(dom.findLinks).toHaveBeenCalledWith('nav a');
@@ -40,7 +42,74 @@ describe('findLinks', () => {
 
   it('returns empty array when no links found', () => {
     const dom = createMockDom();
-    expect(findLinks(dom, '.nonexistent')).toEqual([]);
+    expect(findLinks('.nonexistent')(dom)).toEqual([]);
+  });
+
+  it('filters out javascript: URLs', () => {
+    const dom = createMockDom({
+      findLinks: vi.fn().mockReturnValue([
+        { text: 'Click', url: 'javascript:void(0)' },
+        { text: 'Intro', url: 'https://example.com/intro' },
+      ]),
+    });
+    const result = findLinks('a')(dom);
+    expect(result).toEqual([{ text: 'Intro', url: 'https://example.com/intro' }]);
+  });
+
+  it('filters out mailto: URLs', () => {
+    const dom = createMockDom({
+      findLinks: vi.fn().mockReturnValue([
+        { text: 'Email', url: 'mailto:test@example.com' },
+        { text: 'Docs', url: 'https://example.com/docs' },
+      ]),
+    });
+    const result = findLinks('a')(dom);
+    expect(result).toEqual([{ text: 'Docs', url: 'https://example.com/docs' }]);
+  });
+
+  it('filters out empty fragment URLs', () => {
+    const dom = createMockDom({
+      findLinks: vi.fn().mockReturnValue([
+        { text: 'Top', url: '#' },
+        { text: 'Guide', url: 'https://example.com/guide' },
+      ]),
+    });
+    const result = findLinks('a')(dom);
+    expect(result).toEqual([{ text: 'Guide', url: 'https://example.com/guide' }]);
+  });
+
+  it('filters out non-HTTP URLs', () => {
+    const dom = createMockDom({
+      findLinks: vi.fn().mockReturnValue([
+        { text: 'FTP', url: 'ftp://files.example.com' },
+        { text: 'Page', url: 'https://example.com/page' },
+      ]),
+    });
+    const result = findLinks('a')(dom);
+    expect(result).toEqual([{ text: 'Page', url: 'https://example.com/page' }]);
+  });
+
+  it('deduplicates identical URLs keeping first occurrence', () => {
+    const dom = createMockDom({
+      findLinks: vi.fn().mockReturnValue([
+        { text: 'Intro', url: 'https://example.com/docs/intro' },
+        { text: 'Introduction', url: 'https://example.com/docs/intro' },
+      ]),
+    });
+    const result = findLinks('a')(dom);
+    expect(result).toHaveLength(1);
+    expect(result[0].text).toBe('Intro');
+  });
+
+  it('filters out URLs starting with ://', () => {
+    const dom = createMockDom({
+      findLinks: vi.fn().mockReturnValue([
+        { text: 'Broken', url: '://invalid' },
+        { text: 'Valid', url: 'https://example.com/valid' },
+      ]),
+    });
+    const result = findLinks('a')(dom);
+    expect(result).toEqual([{ text: 'Valid', url: 'https://example.com/valid' }]);
   });
 });
 
@@ -54,17 +123,17 @@ describe('extractArticle', () => {
       fetchPage: vi.fn().mockResolvedValue('<html><body>Content</body></html>'),
     });
     const extractor = createMockExtractor({
-      extract: vi.fn().mockReturnValue({ title: 'Test Page', content: '<p>Content</p>' }),
+      extract: vi.fn().mockReturnValue({ content: '<p>Content</p>', title: 'Test Page' }),
     });
 
-    const article = await extractArticle(fetcher, extractor, 'https://example.com/page');
+    const article = await extractArticle('https://example.com/page')({ extractor, fetcher });
 
     expect(fetcher.fetchPage).toHaveBeenCalledWith('https://example.com/page');
     expect(extractor.extract).toHaveBeenCalledWith('<html><body>Content</body></html>');
     expect(article).toEqual({
-      url: 'https://example.com/page',
-      title: 'Test Page',
       content: '<p>Content</p>',
+      title: 'Test Page',
+      url: 'https://example.com/page',
     });
   });
 
@@ -74,9 +143,9 @@ describe('extractArticle', () => {
     });
     const extractor = createMockExtractor();
 
-    await expect(extractArticle(fetcher, extractor, 'https://example.com/fail')).rejects.toThrow(
-      'Network error',
-    );
+    await expect(
+      extractArticle('https://example.com/fail')({ extractor, fetcher })
+    ).rejects.toThrow('Network error');
     expect(extractor.extract).not.toHaveBeenCalled();
   });
 
@@ -88,8 +157,8 @@ describe('extractArticle', () => {
       }),
     });
 
-    await expect(extractArticle(fetcher, extractor, 'https://example.com/empty')).rejects.toThrow(
-      'No readable content',
-    );
+    await expect(
+      extractArticle('https://example.com/empty')({ extractor, fetcher })
+    ).rejects.toThrow('No readable content');
   });
 });
