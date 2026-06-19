@@ -1,22 +1,35 @@
 import { createDomFinder } from './adapter/dom-finder';
 import { createGmFetcher } from './adapter/gm-fetcher';
 import { createReadabilityExtractor } from './adapter/readability-extractor';
-import { extractArticle, findLinks } from './core/usecase';
+import type { Article } from './core/entity';
+import { DEFAULT_BATCH_CONFIG, extractArticlesStream, findLinks } from './core/usecase';
 import { promptSelector, promptSettings, selectLinks } from './gateway/dialog';
 import { registerMenu } from './gateway/menu';
 import { buildHtml, DEFAULT_PRINT_CSS, openPreview } from './gateway/printer';
 import { isCancelled, removeProgress, showProgress, showToast } from './gateway/progress';
-import { getCustomCss, initCustomCss, setCustomCss } from './gateway/storage';
+import {
+  getBatchConfig,
+  getCustomCss,
+  initBatchConfig,
+  initCustomCss,
+  setBatchConfig,
+  setCustomCss,
+} from './gateway/storage';
 import { injectStyles } from './gateway/styles';
 
 const start = async (): Promise<void> => {
   let lastSelector = '';
 
   while (true) {
-    const selector = await promptSelector(lastSelector || undefined);
-    if (selector === null) return;
+    const result = await promptSelector({
+      config: getBatchConfig(DEFAULT_BATCH_CONFIG),
+      selector: lastSelector || undefined,
+    });
+    if (result === null) return;
+    const { selector, config } = result;
+    setBatchConfig(config);
 
-    const links = findLinks(selector)(createDomFinder());
+    const links = findLinks(selector)(window.location.hostname)(createDomFinder());
     if (links.length === 0) {
       showToast('No matching links found');
       return;
@@ -33,26 +46,21 @@ const start = async (): Promise<void> => {
     const extractor = createReadabilityExtractor();
 
     showProgress({ done: 0, phase: 'Processing pages...', total: selected.length });
-    const articles = [];
-
-    for (const url of selected) {
-      if (isCancelled()) {
-        removeProgress();
-        return;
-      }
-      try {
-        const article = await extractArticle(url)({ extractor, fetcher });
-        articles.push(article);
-        showProgress({
-          done: articles.length,
-          phase: 'Processing pages...',
-          total: selected.length,
-        });
-      } catch {
-        // Skip failed pages
-      }
+    const articles: Article[] = [];
+    for await (const article of extractArticlesStream(selected)(config)({ extractor, fetcher })) {
+      if (isCancelled()) break;
+      articles.push(article);
+      showProgress({
+        done: articles.length,
+        phase: 'Processing pages...',
+        total: selected.length,
+      });
     }
 
+    if (isCancelled()) {
+      removeProgress();
+      return;
+    }
     if (articles.length === 0) {
       removeProgress();
       showToast('All pages failed to fetch');
@@ -60,7 +68,7 @@ const start = async (): Promise<void> => {
     }
 
     const customCss = getCustomCss(DEFAULT_PRINT_CSS);
-    const html = buildHtml(articles, customCss);
+    const html = buildHtml({ articles, customCss });
 
     removeProgress();
     const win = openPreview(html);
@@ -80,6 +88,7 @@ const openSettings = async (): Promise<void> => {
 const init = (): void => {
   injectStyles();
   initCustomCss(DEFAULT_PRINT_CSS);
+  initBatchConfig(DEFAULT_BATCH_CONFIG);
   registerMenu({
     onSettings: () => void openSettings(),
     onStart: () => void start(),

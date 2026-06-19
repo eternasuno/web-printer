@@ -1,10 +1,25 @@
 import type { LinkInfo } from '../core/port';
+import { type BatchConfig, DEFAULT_BATCH_CONFIG } from '../core/usecase';
+import { escapeHtml } from './html';
 import { DEFAULT_PRINT_CSS } from './printer';
 
-const escaped = (text: string): string =>
-  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const toInt = (value: string, min: number, fallback: number): number => {
+  if (!value.trim()) return fallback;
+  const n = Math.floor(Number(value));
+  return Number.isFinite(n) && n >= min ? n : fallback;
+};
 
-const selectorDialogHtml = (): string => `
+export const readBatchConfig = (raw: {
+  concurrency: string;
+  interval: string;
+  timeout: string;
+}): BatchConfig => ({
+  concurrency: toInt(raw.concurrency, 1, DEFAULT_BATCH_CONFIG.concurrency),
+  interval: toInt(raw.interval, 0, DEFAULT_BATCH_CONFIG.interval),
+  timeout: toInt(raw.timeout, 1, DEFAULT_BATCH_CONFIG.timeout),
+});
+
+const selectorDialogHtml = (config: BatchConfig): string => `
   <div id="wp-dialog">
     <div id="wp-dialog-header">
       <h2>Web Printer</h2>
@@ -15,6 +30,24 @@ const selectorDialogHtml = (): string => `
       <input id="wp-selector-input" class="wp-input" type="text"
         placeholder="e.g.: nav a, .sidebar a[href*='/docs/']" value="a[href]" autofocus />
       <p class="wp-hint">The script will find matching &lt;a&gt; elements and extract their href.</p>
+      <button id="wp-advanced-toggle" type="button" class="wp-advanced-toggle">Advanced Settings ▸</button>
+      <div id="wp-advanced-section" class="wp-advanced-section" hidden>
+        <label class="wp-config-field">
+          <span>Concurrency</span>
+          <input id="wp-config-concurrency" class="wp-input wp-config-input" type="number" min="1" step="1"
+            value="${config.concurrency}" />
+        </label>
+        <label class="wp-config-field">
+          <span>Interval (ms)</span>
+          <input id="wp-config-interval" class="wp-input wp-config-input" type="number" min="0" step="1"
+            value="${config.interval}" />
+        </label>
+        <label class="wp-config-field">
+          <span>Timeout (ms)</span>
+          <input id="wp-config-timeout" class="wp-input wp-config-input" type="number" min="1" step="1"
+            value="${config.timeout}" />
+        </label>
+      </div>
     </div>
     <div id="wp-dialog-footer">
       <button id="wp-find-btn" class="wp-btn wp-btn-primary">Find Links</button>
@@ -46,23 +79,40 @@ const createOverlay = (html: string): HTMLDivElement => {
   return overlay;
 };
 
-export const promptSelector = (initialSelector?: string): Promise<string | null> =>
+export const promptSelector = (initial: {
+  selector?: string;
+  config: BatchConfig;
+}): Promise<{ selector: string; config: BatchConfig } | null> =>
   new Promise((resolve) => {
-    const overlay = createOverlay(selectorDialogHtml());
+    const overlay = createOverlay(selectorDialogHtml(initial.config));
     document.body.appendChild(overlay);
     const input = overlay.querySelector('#wp-selector-input') as HTMLInputElement;
     const findBtn = overlay.querySelector('#wp-find-btn') as HTMLElement;
     const closeBtn = overlay.querySelector('#wp-close-btn') as HTMLElement;
+    const toggle = overlay.querySelector('#wp-advanced-toggle') as HTMLElement;
+    const section = overlay.querySelector('#wp-advanced-section') as HTMLElement;
 
-    if (initialSelector) {
-      input.value = initialSelector;
+    if (initial.selector) {
+      input.value = initial.selector;
     }
+
+    toggle.onclick = (): void => {
+      const open = section.hasAttribute('hidden');
+      if (open) section.removeAttribute('hidden');
+      else section.setAttribute('hidden', '');
+      toggle.textContent = open ? 'Advanced Settings ▾' : 'Advanced Settings ▸';
+    };
 
     const submit = (): void => {
       const selector = input.value.trim();
       if (!selector) return;
+      const config = readBatchConfig({
+        concurrency: (overlay.querySelector('#wp-config-concurrency') as HTMLInputElement).value,
+        interval: (overlay.querySelector('#wp-config-interval') as HTMLInputElement).value,
+        timeout: (overlay.querySelector('#wp-config-timeout') as HTMLInputElement).value,
+      });
       overlay.remove();
-      resolve(selector);
+      resolve({ config, selector });
     };
     input.onkeydown = (e) => {
       if (e.key === 'Enter') submit();
@@ -101,8 +151,8 @@ export const promptSettings = (currentCss: string): Promise<string | null> =>
   });
 
 const buildLinkItemHtml = (params: { link: LinkInfo; checked: boolean }): string => {
-  const title = escaped(params.link.text);
-  const url = escaped(params.link.url);
+  const title = escapeHtml(params.link.text);
+  const url = escapeHtml(params.link.url);
   return `<label class="wp-link-item">
       <input type="checkbox" class="wp-link-checkbox" value="${url}" ${params.checked ? 'checked' : ''} />
       <span class="wp-link-content">
