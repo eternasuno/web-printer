@@ -20,3 +20,6 @@ tsconfig.tsbuildinfo
 
 # MacOS
 .DS_Store
+
+# pnpm store
+.pnpm-store/

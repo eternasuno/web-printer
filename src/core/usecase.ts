@@ -1,9 +1,6 @@
 import type { Article } from './entity';
 import type { ContentExtractorPort, DomPort, LinkInfo, PageFetcherPort } from './port';
 
-const isIgnoredUrl = (url: string): boolean =>
-  url.startsWith('javascript:') || url.startsWith('mailto:') || url === '#';
-
 const isHttpUrl = (url: string): boolean =>
   url.startsWith('http://') || url.startsWith('https://');
 
@@ -14,7 +11,7 @@ export const findLinks =
     const seen = new Set<string>();
     const links: LinkInfo[] = [];
     for (const link of raw) {
-      if (isIgnoredUrl(link.url) || !isHttpUrl(link.url)) continue;
+      if (!isHttpUrl(link.url)) continue;
       if (seen.has(link.url)) continue;
       seen.add(link.url);
       links.push(link);
