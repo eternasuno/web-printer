@@ -116,6 +116,20 @@ export const DIALOG_STYLES = `
   line-height: 1.5; text-align: center;
 }
 #wp-toast.show { display: block; }
+.wp-advanced-toggle {
+  margin-top: 4px; padding: 0; border: none; background: none; cursor: pointer;
+  font-family: inherit; font-size: 13px; color: #1a73e8; user-select: none;
+}
+.wp-advanced-toggle:hover { text-decoration: underline; }
+.wp-advanced-section {
+  margin-top: 12px; padding: 12px; border: 1px solid #e0e0e0; border-radius: 6px;
+  background: #fafafa; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+}
+.wp-config-field {
+  display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #555;
+}
+.wp-config-field span { font-weight: 500; }
+.wp-config-input { padding: 6px 8px; font-size: 13px; }
 `;
 
 export const injectStyles = (): void => {

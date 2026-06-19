@@ -1,4 +1,5 @@
 import type { Article } from '../core/entity';
+import { escapeHtml } from './html';
 
 export const DEFAULT_PRINT_CSS = `
 * { box-sizing: border-box; }
@@ -52,23 +53,29 @@ blockquote {
 }
 `;
 
-const esc = (text: string): string =>
-  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-
 const buildSourceUrl = (url: string): string =>
-  url ? `<p class="source-url">Source: <a href="${esc(url)}">${esc(url)}</a></p>` : '';
+  url
+    ? `<p class="source-url">Source: <a href="${escapeHtml(url)}">${escapeHtml(url)}</a></p>`
+    : '';
 
-const buildContentBlock = (article: Article, index: number): string =>
-  `<section class="page-section">
-    <h1 class="page-title">${esc(article.title || `Page ${index + 1}`)}</h1>
+const buildContentBlock =
+  (article: Article) =>
+  (index: number): string =>
+    `<section class="page-section">
+    <h1 class="page-title">${escapeHtml(article.title || `Page ${index + 1}`)}</h1>
     ${buildSourceUrl(article.url)}
     ${article.content}
   </section>`;
 
-export const buildHtml = (articles: Article[], customCss?: string): string => {
-  const content = articles.map((article, index) => buildContentBlock(article, index)).join('\n');
+type BuildHtmlParams = {
+  articles: Article[];
+  customCss?: string;
+};
+
+export const buildHtml = ({ articles, customCss }: BuildHtmlParams): string => {
+  const content = articles.map((article, index) => buildContentBlock(article)(index)).join('\n');
   const css = customCss ?? DEFAULT_PRINT_CSS;
-  const escapedCss = esc(css);
+  const escapedCss = escapeHtml(css);
   return `<!DOCTYPE html>
 <html lang="en">
 <head>

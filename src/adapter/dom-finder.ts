@@ -1,4 +1,4 @@
-import type { DomPort, LinkInfo } from '../core/port';
+import type { Dom, LinkInfo } from '../core/port';
 
 const resolveUrl = (href: string): string | null => {
   try {
@@ -8,7 +8,7 @@ const resolveUrl = (href: string): string | null => {
   }
 };
 
-export const createDomFinder = (): DomPort => ({
+export const createDomFinder = (): Dom => ({
   findLinks: (selector: string): LinkInfo[] => {
     const anchors = document.querySelectorAll<HTMLAnchorElement>(selector);
     const links: LinkInfo[] = [];

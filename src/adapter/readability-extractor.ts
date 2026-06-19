@@ -1,7 +1,7 @@
 import Readability from '@mozilla/readability';
-import type { ContentExtractorPort } from '../core/port';
+import type { Extractor } from '../core/port';
 
-export const createReadabilityExtractor = (): ContentExtractorPort => ({
+export const createReadabilityExtractor = (): Extractor => ({
   extract: (html: string) => {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const reader = new Readability(doc);
