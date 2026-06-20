@@ -13,7 +13,7 @@ vi.mock('@mozilla/readability', () => {
       return { content: '<p>Test content</p>', title: 'Test Title' };
     }
   };
-  return { default: Readability, Readability };
+  return { Readability };
 });
 
 describe('extract', () => {

@@ -40,9 +40,9 @@ type ExtractArticleDeps = {
 };
 
 export const extractArticle =
-  (url: string) =>
+  (url: string, timeout: number) =>
   async (deps: ExtractArticleDeps): Promise<Article> => {
-    const html = await deps.fetcher.fetchPage(url);
+    const html = await deps.fetcher.fetchPage(url, timeout);
     const { title, content } = deps.extractor.extract(html);
     return { content, title, url };
   };
@@ -64,30 +64,11 @@ export const DEFAULT_BATCH_CONFIG: BatchConfig = {
 const delay = (ms: number) => (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-const withTimeout =
-  (ms: number) =>
-  <T>(task: () => Promise<T>): Promise<T> =>
-    new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Timeout')), ms);
-      task().then(
-        (value) => {
-          clearTimeout(timer);
-          resolve(value);
-        },
-        (error) => {
-          clearTimeout(timer);
-          reject(error);
-        }
-      );
-    });
-
 const runOne =
   (config: BatchConfig) =>
   (deps: ExtractArticleDeps) =>
   (url: string): Promise<Article | null> =>
-    withTimeout(config.timeout)(() => extractArticle(url)(deps)).catch(
-      (): Article | null => null
-    );
+    extractArticle(url, config.timeout)(deps).catch((): Article | null => null);
 
 export const extractArticlesStream =
   (urls: string[]) =>

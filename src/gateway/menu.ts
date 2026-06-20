@@ -1,5 +1,3 @@
-declare function GM_registerMenuCommand(name: string, callback: () => void): void;
-
 export const registerMenu = (callbacks: {
   onStart: () => void;
   onSettings: () => void;

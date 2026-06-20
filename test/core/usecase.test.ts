@@ -143,9 +143,12 @@ describe('extractArticle', () => {
       extract: vi.fn().mockReturnValue({ content: '<p>Content</p>', title: 'Test Page' }),
     });
 
-    const article = await extractArticle('https://example.com/page')({ extractor, fetcher });
+    const article = await extractArticle(
+      'https://example.com/page',
+      5000
+    )({ extractor, fetcher });
 
-    expect(fetcher.fetchPage).toHaveBeenCalledWith('https://example.com/page');
+    expect(fetcher.fetchPage).toHaveBeenCalledWith('https://example.com/page', 5000);
     expect(extractor.extract).toHaveBeenCalledWith('<html><body>Content</body></html>');
     expect(article).toEqual({
       content: '<p>Content</p>',
@@ -161,7 +164,7 @@ describe('extractArticle', () => {
     const extractor = createMockExtractor();
 
     await expect(
-      extractArticle('https://example.com/fail')({ extractor, fetcher })
+      extractArticle('https://example.com/fail', 5000)({ extractor, fetcher })
     ).rejects.toThrow('Network error');
     expect(extractor.extract).not.toHaveBeenCalled();
   });
@@ -175,7 +178,7 @@ describe('extractArticle', () => {
     });
 
     await expect(
-      extractArticle('https://example.com/empty')({ extractor, fetcher })
+      extractArticle('https://example.com/empty', 5000)({ extractor, fetcher })
     ).rejects.toThrow('No readable content');
   });
 });
@@ -289,25 +292,21 @@ describe('extractArticlesStream', () => {
     ]);
   });
 
-  it('times out slow fetches and skips them', async () => {
+  it('forwards the configured timeout to the fetcher', async () => {
     const fetcher = createMockFetcher({
-      fetchPage: vi
-        .fn()
-        .mockImplementation(
-          () => new Promise<string>((resolve) => setTimeout(() => resolve('<html></html>'), 500))
-        ),
+      fetchPage: vi.fn().mockResolvedValue('<html></html>'),
     });
     const extractor = createMockExtractor();
-    const urls = ['https://example.com/slow'];
+    const urls = ['https://example.com/a'];
 
-    const articles = await collect(
-      extractArticlesStream(urls)({ concurrency: 1, interval: 0, timeout: 30 })({
+    await collect(
+      extractArticlesStream(urls)({ concurrency: 1, interval: 0, timeout: 7500 })({
         extractor,
         fetcher,
       })
     );
 
-    expect(articles).toEqual([]);
+    expect(fetcher.fetchPage).toHaveBeenCalledWith('https://example.com/a', 7500);
   });
 
   it('waits the interval between consecutive fetches', async () => {

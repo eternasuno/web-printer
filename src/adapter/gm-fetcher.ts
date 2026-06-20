@@ -1,16 +1,7 @@
 import type { Http } from '../core/port';
 
-type GmRequest = {
-  url: string;
-  onload?: (res: { responseText: string; status: number }) => void;
-  onerror?: (err: { error: string }) => void;
-  method?: string;
-};
-
-declare function GM_xmlhttpRequest(details: GmRequest): void;
-
 export const createGmFetcher = (): Http => ({
-  fetchPage: (url: string): Promise<string> =>
+  fetchPage: (url: string, timeout: number): Promise<string> =>
     new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
         method: 'GET',
@@ -22,6 +13,8 @@ export const createGmFetcher = (): Http => ({
             reject(new Error(`HTTP ${res.status}`));
           }
         },
+        ontimeout: () => reject(new Error('Timeout')),
+        timeout,
         url,
       });
     }),

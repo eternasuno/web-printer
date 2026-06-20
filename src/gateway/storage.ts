@@ -1,8 +1,5 @@
 import type { BatchConfig } from '../core/usecase';
 
-declare function GM_getValue(key: string, defaultValue?: string): string;
-declare function GM_setValue(key: string, value: string): void;
-
 const CSS_KEY = 'wp-custom-css';
 const BATCH_KEY = 'wp-batch-config';
 

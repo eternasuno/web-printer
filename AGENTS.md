@@ -4,7 +4,7 @@ Userscript that merges documentation pages into a single HTML for browser print/
 
 ## Tech Stack
 
-TypeScript 5.7, Vite 6 + vite-plugin-monkey, Vitest, @mozilla/readability, Tampermonkey/Violentmonkey, Biome
+TypeScript 5.7, Vite 6 + vite-plugin-monkey, Vitest, @mozilla/readability, @types/tampermonkey, Tampermonkey/Violentmonkey, Biome
 
 ## Architecture
 
@@ -26,7 +26,7 @@ src/
 │   ├── storage.ts   # GM_getValue/GM_setValue for custom CSS
 │   ├── styles.ts    # CSS styles for UI components
 │   └── main.ts      # Entry point (wires adapters, gateways, use cases)
-└── readability.d.ts
+└── globals.d.ts     # Ambient GM_* type reference (@types/tampermonkey)
 ```
 
 ## Flow
@@ -42,6 +42,7 @@ src/
 - No callbacks; use async/await
 - English only in code, comments, docs, UI text
 - No emoji
+- GM_* APIs are typed via `@types/tampermonkey` (referenced in `src/globals.d.ts`); do not redeclare `GM_*` functions in modules
 
 ## Skills
 

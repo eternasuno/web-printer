@@ -1,4 +1,4 @@
-import Readability from '@mozilla/readability';
+import { Readability } from '@mozilla/readability';
 import type { Extractor } from '../core/port';
 
 export const createReadabilityExtractor = (): Extractor => ({

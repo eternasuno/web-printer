@@ -10,7 +10,7 @@ export type Dom = {
 };
 
 export type Http = {
-  fetchPage(url: string): Promise<string>;
+  fetchPage(url: string, timeout: number): Promise<string>;
 };
 
 export type Extractor = {
