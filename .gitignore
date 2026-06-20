@@ -9,9 +9,6 @@ devenv.local.yaml
 # pre-commit
 .pre-commit-config.yaml
 
-# opencode
-.opencode
-
 # Node
 node_modules/
 dist/
