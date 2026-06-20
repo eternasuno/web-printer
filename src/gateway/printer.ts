@@ -81,6 +81,7 @@ export const buildHtml = ({ articles, customCss }: BuildHtmlParams): string => {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="wp-preview" content="true">
 <title>Merged Document - ${articles.length} pages</title>
 <style id="wp-preview-style">${css}</style>
 <style>
@@ -108,7 +109,7 @@ export const buildHtml = ({ articles, customCss }: BuildHtmlParams): string => {
     <button id="wp-print" type="button" title="Print" aria-label="Print">🖨️</button>
     <button id="wp-settings" type="button" title="Settings" aria-label="Settings">⚙️</button>
   </div>
-  <div class="wp-overlay" id="wp-overlay">
+  <div class="wp-overlay" id="wp-preview-overlay">
     <div class="wp-settings">
       <div class="wp-settings-header">
         <h2>Settings</h2>
@@ -132,7 +133,7 @@ export const openPreview = (html: string): Window | null => {
   const doc = win.document;
   const style = doc.getElementById('wp-preview-style') as HTMLStyleElement | null;
   const editor = doc.getElementById('wp-css-editor') as HTMLTextAreaElement | null;
-  const overlay = doc.getElementById('wp-overlay') as HTMLDivElement | null;
+  const overlay = doc.getElementById('wp-preview-overlay') as HTMLDivElement | null;
   const applyBtn = doc.getElementById('wp-apply') as HTMLButtonElement | null;
 
   doc.getElementById('wp-print')?.addEventListener('click', () => {

@@ -67,7 +67,7 @@ describe('buildHtml', () => {
     expect(html).toContain('wp-toolbar');
     expect(html).toContain('wp-print');
     expect(html).toContain('wp-settings');
-    expect(html).toContain('wp-overlay');
+    expect(html).toContain('wp-preview-overlay');
     expect(html).toContain('wp-css-editor');
     expect(html).toContain('wp-apply');
   });
@@ -77,6 +77,13 @@ describe('buildHtml', () => {
       articles: [{ content: '<p>A</p>', title: 'A', url: 'https://example.com/a' }],
     });
     expect(html).toContain('id="wp-preview-style"');
+  });
+
+  it('includes preview marker meta tag', () => {
+    const html = buildHtml({
+      articles: [{ content: '<p>A</p>', title: 'A', url: 'https://example.com/a' }],
+    });
+    expect(html).toContain('meta name="wp-preview"');
   });
 
   it('escapes CSS content in textarea', () => {

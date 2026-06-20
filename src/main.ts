@@ -86,6 +86,7 @@ const openSettings = async (): Promise<void> => {
 };
 
 const init = (): void => {
+  if (document.querySelector('meta[name="wp-preview"]')) return;
   injectStyles();
   initCustomCss(DEFAULT_PRINT_CSS);
   initBatchConfig(DEFAULT_BATCH_CONFIG);
