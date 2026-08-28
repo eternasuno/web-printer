@@ -48,8 +48,7 @@ src/
 | Skill | When to load |
 |-------|-------------|
 | `clean-architecture` | Creating files, moving code between modules, adding ports/adapters |
-| `clean-code` | Writing new functions/types, naming, deciding functional vs OOP |
-| `coding-guidelines` | Editing existing code, refactoring, surgical changes |
+| `writing-lean-code` | Writing or reviewing code, functions, types, naming, data flow, or module boundaries |
 
 ## Commands
 

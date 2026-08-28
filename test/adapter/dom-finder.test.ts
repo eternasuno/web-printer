@@ -1,71 +1,38 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { createDomFinder } from '../../src/adapter/dom-finder';
+import { describe, expect, it } from 'vitest';
+import { findLinks } from '../../src/adapter/dom-finder';
 
-describe('findLinks', () => {
-  beforeEach(() => {
-    document.body.innerHTML = '';
+const documentFor = (html: string) => {
+  const doc = document.implementation.createHTMLDocument();
+  doc.body.innerHTML = html;
+  Object.defineProperty(doc, 'evaluate', {
+    value: (xpath: string) => {
+      if (xpath.includes('string(')) return { snapshotLength: 1, snapshotItem: () => 'text' };
+      if (xpath === '//*[') throw new Error('Invalid XPath');
+      const nodes = xpath.includes('//*[@id="x"]')
+        ? [doc.querySelector('a'), doc.querySelector('#x')]
+        : [...doc.querySelectorAll('a')];
+      return { snapshotLength: nodes.length, snapshotItem: (index: number) => nodes[index] };
+    },
   });
+  return doc;
+};
 
-  it('finds links by CSS selector', () => {
-    document.body.innerHTML = `
-      <nav>
-        <a href="/docs/intro">Introduction</a>
-        <a href="/docs/guide">User Guide</a>
-        <a href="/docs/api">API Reference</a>
-      </nav>
-    `;
-    const links = createDomFinder().findLinks('nav a');
-    expect(links).toHaveLength(3);
-    expect(links.every((l) => 'text' in l && 'url' in l)).toBe(true);
+describe('DOM finder', () => {
+  it('finds anchors directly and inside containers in document order', () => {
+    const doc = documentFor('<a href="/a">A</a><div id="x"><a href="/b">B</a></div>');
+    expect(findLinks('//a | //*[@id="x"]', doc).map((link) => link.href)).toEqual(['/a', '/b']);
   });
-
-  it('uses anchor text as display label', () => {
-    document.body.innerHTML = `<a href="/docs/getting-started">Getting Started</a>`;
-    const links = createDomFinder().findLinks('a');
-    expect(links[0].text).toBe('Getting Started');
+  it('deduplicates nested anchor results', () => {
+    const doc = documentFor('<div id="x"><a href="/a">A</a></div>');
+    expect(findLinks('//*[@id="x"] | //a', doc)).toHaveLength(1);
   });
-
-  it('falls back to URL when text is empty', () => {
-    document.body.innerHTML = `<a href="/docs/quickref"></a>`;
-    const links = createDomFinder().findLinks('a');
-    expect(links[0].text).toBe(links[0].url);
+  it('preserves text and download state', () => {
+    const doc = documentFor('<a href="/x" download> X </a>');
+    expect(findLinks('//a', doc)).toEqual([{ text: ' X ', href: '/x', downloadable: true }]);
   });
-
-  it('resolves relative URLs to absolute', () => {
-    document.body.innerHTML = `<a href="/docs/guide">Guide</a>`;
-    const links = createDomFinder().findLinks('a');
-    expect(links[0].url).toContain('/docs/guide');
-  });
-
-  it('includes all hrefs without filtering', () => {
-    document.body.innerHTML = `
-      <a href="javascript:void(0)">Click</a>
-      <a href="mailto:test@example.com">Email</a>
-      <a href="#">Top</a>
-      <a href="/docs/intro">Intro</a>
-    `;
-    const links = createDomFinder().findLinks('a');
-    expect(links).toHaveLength(4);
-  });
-
-  it('includes duplicate URLs without deduplication', () => {
-    document.body.innerHTML = `
-      <a href="/docs/intro">Intro</a>
-      <a href="/docs/intro">Introduction</a>
-    `;
-    const links = createDomFinder().findLinks('a');
-    expect(links).toHaveLength(2);
-  });
-
-  it('skips anchors without href attribute', () => {
-    document.body.innerHTML = `<a name="anchor">No href</a>`;
-    expect(createDomFinder().findLinks('a')).toHaveLength(0);
-  });
-
-  it('includes anchors with unusual hrefs (filtering is usecase concern)', () => {
-    document.body.innerHTML = `<a href="://invalid">Broken</a>`;
-    const links = createDomFinder().findLinks('a');
-    // Adapter does not filter; usecase handles validity checks
-    expect(links.length).toBeGreaterThanOrEqual(0);
+  it('rejects invalid XPath and non-node results', () => {
+    const doc = documentFor('<p>x</p>');
+    expect(() => findLinks('//*[', doc)).toThrow();
+    expect(() => findLinks('string(//p)', doc)).toThrow('elements');
   });
 });

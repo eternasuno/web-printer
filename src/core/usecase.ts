@@ -1,118 +1,131 @@
-import type { Article } from './entity';
-import type { Dom, Extractor, Http, LinkInfo } from './port';
+import type { Article, BatchResult, Failure, FailureCode, SourceLink } from './entity';
 
-const isHttpUrl = (url: string): boolean =>
-  url.startsWith('http://') || url.startsWith('https://');
-
-const hostnameOf = (url: string): string | null => {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return null;
-  }
-};
-
-const isSameDomain =
-  (url: string) =>
-  (domain: string): boolean =>
-    hostnameOf(url) === domain;
-
-export const findLinks =
-  (selector: string) =>
-  (currentDomain: string) =>
-  (dom: Dom): LinkInfo[] => {
-    const raw = dom.findLinks(selector);
-    const seen = new Set<string>();
-    const links: LinkInfo[] = [];
-    for (const link of raw) {
-      if (!isHttpUrl(link.url)) continue;
-      if (!isSameDomain(link.url)(currentDomain)) continue;
-      if (seen.has(link.url)) continue;
-      seen.add(link.url);
-      links.push(link);
+const limit = 200;
+const cancelled = (): Error => Object.assign(new Error('Cancelled'), { code: 'cancelled' });
+const failure = (url: string, code: FailureCode, error: unknown): Failure => ({
+  url,
+  code,
+  message: error instanceof Error ? error.message : String(error),
+});
+export type DiscoverResult = SourceLink[] & { truncated: boolean };
+export const discoverLinks = (
+  xpath: string,
+  pageUrl: string,
+  findLinks: (xpath: string) => { text: string; href: string; downloadable?: boolean }[] = () => [],
+): DiscoverResult => {
+  if (!xpath.trim()) throw new Error('XPath is required');
+  const raw = findLinks(xpath);
+  const base = new URL(pageUrl);
+  const seen = new Set<string>();
+  const links = raw.flatMap((link) => {
+    if (!link.href || link.downloadable) return [];
+    let url: URL;
+    try {
+      url = new URL(link.href, base);
+    } catch {
+      return [];
     }
-    return links;
-  };
-
-type ExtractArticleDeps = {
-  fetcher: Http;
-  extractor: Extractor;
+    if (
+      !['http:', 'https:'].includes(url.protocol) ||
+      url.origin !== base.origin ||
+      url.username ||
+      url.password
+    )
+      return [];
+    url.hash = '';
+    const normalized = url.href;
+    if (seen.has(normalized)) return [];
+    seen.add(normalized);
+    return [{ text: link.text.trim() || normalized, url: normalized, selected: true }];
+  });
+  const result = links.slice(0, limit) as DiscoverResult;
+  Object.defineProperty(result, 'truncated', { value: links.length > limit, enumerable: false });
+  return result;
 };
 
-export const extractArticle =
-  (url: string) =>
-  async (deps: ExtractArticleDeps): Promise<Article> => {
-    const html = await deps.fetcher.fetchPage(url);
-    const { title, content } = deps.extractor.extract(html);
-    return { content, title, url };
-  };
-
-type BatchConfig = {
-  concurrency: number;
-  interval: number;
-  timeout: number;
-};
-
-export type { BatchConfig };
-
-export const DEFAULT_BATCH_CONFIG: BatchConfig = {
-  concurrency: 3,
-  interval: 500,
-  timeout: 30000,
-};
-
-const delay = (ms: number) => (): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
-
-const withTimeout =
-  (ms: number) =>
-  <T>(task: () => Promise<T>): Promise<T> =>
-    new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('Timeout')), ms);
-      task().then(
-        (value) => {
-          clearTimeout(timer);
-          resolve(value);
-        },
-        (error) => {
-          clearTimeout(timer);
-          reject(error);
-        }
-      );
+const batchConfig = { concurrency: 3, interval: 500, timeout: 30000 } as const;
+export const runBatch = async (
+  urls: string[],
+  fetch: (url: string, signal: AbortSignal) => Promise<Article>,
+  signal = new AbortController().signal,
+  onProgress?: (value: {
+    completed: number;
+    succeeded: number;
+    failed: number;
+    total: number;
+  }) => void,
+): Promise<BatchResult> => {
+  const articles: (Article | undefined)[] = new Array(urls.length);
+  const failures: (Failure | undefined)[] = new Array(urls.length);
+  let next = 0;
+  let lastStart = -Infinity;
+  let schedule: Promise<void> = Promise.resolve();
+  const startSlot = async (): Promise<void> => {
+    const slot = schedule.then(async () => {
+      const delay = Math.max(0, batchConfig.interval - (Date.now() - lastStart));
+      if (delay)
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, delay);
+          const abort = (): void => {
+            clearTimeout(timer);
+            reject(cancelled());
+          };
+          signal.addEventListener('abort', abort, { once: true });
+          if (signal.aborted) abort();
+        });
+      if (signal.aborted) throw cancelled();
+      lastStart = Date.now();
     });
-
-const runOne =
-  (config: BatchConfig) =>
-  (deps: ExtractArticleDeps) =>
-  (url: string): Promise<Article | null> =>
-    withTimeout(config.timeout)(() => extractArticle(url)(deps)).catch(
-      (): Article | null => null
-    );
-
-export const extractArticlesStream =
-  (urls: string[]) =>
-  (config: BatchConfig) =>
-  (deps: ExtractArticleDeps): AsyncGenerator<Article> => {
-    const limit = Math.max(1, config.concurrency);
-    const slots: Promise<Article | null>[] = new Array(urls.length);
-    let launched = 0;
-    let first = true;
-
-    const ensure = async (untilIndex: number): Promise<void> => {
-      while (launched <= untilIndex && launched < urls.length) {
-        if (!first) await delay(config.interval)();
-        first = false;
-        const index = launched;
-        slots[index] = runOne(config)(deps)(urls[index]);
-        launched += 1;
-      }
-    };
-
-    return (async function* (): AsyncGenerator<Article> {
-      for (let index = 0; index < urls.length; index++) {
-        await ensure(index + limit - 1);
-        const value = await slots[index];
-        if (value) yield value;
-      }
-    })();
+    schedule = slot.catch(() => undefined);
+    await slot;
   };
+  const worker = async (): Promise<void> => {
+    while (true) {
+      if (signal.aborted) throw cancelled();
+      const index = next++;
+      if (index >= urls.length) return;
+      await startSlot();
+      const controller = new AbortController();
+      const abort = (): void => controller.abort();
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) controller.abort();
+      let timedOut = false;
+      let timeoutReject!: (error: Error) => void;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutReject = reject;
+      });
+      const timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+        timeoutReject(Object.assign(new Error('Timeout'), { code: 'timeout' }));
+      }, batchConfig.timeout);
+      try {
+        articles[index] = await Promise.race([
+          fetch(urls[index], controller.signal),
+          timeoutPromise,
+        ]);
+      } catch (error) {
+        if (signal.aborted) throw cancelled();
+        failures[index] = failure(
+          urls[index],
+          timedOut ? 'timeout' : ((error as { code?: FailureCode }).code ?? 'internal-error'),
+          error,
+        );
+      } finally {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', abort);
+      }
+      onProgress?.({
+        completed: articles.filter(Boolean).length + failures.filter(Boolean).length,
+        succeeded: articles.filter(Boolean).length,
+        failed: failures.filter(Boolean).length,
+        total: urls.length,
+      });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(batchConfig.concurrency, urls.length) }, worker));
+  return {
+    articles: articles.filter((item): item is Article => Boolean(item)),
+    failures: failures.filter((item): item is Failure => Boolean(item)),
+  };
+};

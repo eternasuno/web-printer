@@ -1,51 +1,68 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createGmFetcher } from '../../src/adapter/gm-fetcher';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fetchPage } from '../../src/adapter/gm-fetcher';
 
-const mockResponses: Record<string, { status: number; body: string }> = {};
+type Callback = {
+  onload: (response: {
+    status: number;
+    responseText: string;
+    responseHeaders: string;
+    finalUrl?: string;
+  }) => void;
+  onerror: () => void;
+  onabort: () => void;
+};
+let current: Callback;
+const abort = vi.fn();
 
-const createGmMock = () =>
-  vi
-    .fn()
-    .mockImplementation(
-      (details: {
-        url: string;
-        onload?: (r: { responseText: string; status: number }) => void;
-        onerror?: (e: { error: string }) => void;
-        ontimeout?: () => void;
-      }) => {
-        const resp = mockResponses[details.url];
-        if (resp) {
-          details.onload?.({ responseText: resp.body, status: resp.status });
-        } else {
-          details.onerror?.({ error: 'Network error' });
-        }
-      }
-    );
+afterEach(() => vi.restoreAllMocks());
 
-beforeEach(() => {
-  (globalThis as Record<string, unknown>).GM_xmlhttpRequest = createGmMock();
-  for (const key of Object.keys(mockResponses)) {
-    delete mockResponses[key];
-  }
-});
-
-describe('fetchPage', () => {
-  it('fetches a single page and returns HTML', async () => {
-    mockResponses['https://example.com/a'] = { body: '<html>A</html>', status: 200 };
-    const html = await createGmFetcher().fetchPage('https://example.com/a');
-    expect(html).toBe('<html>A</html>');
+describe('GM fetcher', () => {
+  it('resolves success, content type, and final URL', async () => {
+    vi.stubGlobal('GM_xmlhttpRequest', (details: Callback) => {
+      current = details;
+      return { abort };
+    });
+    const promise = fetchPage('/a', new AbortController().signal);
+    current.onload({
+      status: 200,
+      responseText: '<html>',
+      responseHeaders: 'Content-Type: text/html; charset=UTF-8\r\n',
+      finalUrl: '/b',
+    });
+    await expect(promise).resolves.toMatchObject({
+      status: 200,
+      contentType: 'text/html',
+      finalUrl: '/b',
+    });
   });
-
-  it('throws on network error', async () => {
-    await expect(createGmFetcher().fetchPage('https://example.com/missing')).rejects.toThrow(
-      'Network error'
-    );
+  it.each([
+    ['onerror', 'network-error'],
+    ['onabort', 'cancelled'],
+  ] as const)('passes %s upward without translating', async (event, code) => {
+    vi.stubGlobal('GM_xmlhttpRequest', (details: Callback) => {
+      current = details;
+      return { abort };
+    });
+    const promise = fetchPage('/a', new AbortController().signal);
+    current[event]();
+    await expect(promise).rejects.toMatchObject({ code });
   });
-
-  it('throws on HTTP error', async () => {
-    mockResponses['https://example.com/404'] = { body: 'Not found', status: 404 };
-    await expect(createGmFetcher().fetchPage('https://example.com/404')).rejects.toThrow(
-      'HTTP 404'
-    );
+  it('aborts on signal, handles already aborted signals, ignores late callbacks, and cleans listener', async () => {
+    vi.stubGlobal('GM_xmlhttpRequest', (details: Callback) => {
+      current = details;
+      return { abort };
+    });
+    const controller = new AbortController();
+    const remove = vi.spyOn(controller.signal, 'removeEventListener');
+    const promise = fetchPage('/a', controller.signal);
+    controller.abort();
+    await expect(promise).rejects.toMatchObject({ code: 'cancelled' });
+    current.onload({ status: 200, responseText: '', responseHeaders: '', finalUrl: '/a' });
+    expect(abort).toHaveBeenCalled();
+    expect(remove).toHaveBeenCalled();
+    const already = new AbortController();
+    already.abort();
+    const second = fetchPage('/b', already.signal);
+    await expect(second).rejects.toMatchObject({ code: 'cancelled' });
   });
 });

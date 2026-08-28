@@ -1,37 +1,37 @@
-import monkey, { cdn } from 'vite-plugin-monkey';
+import monkey from 'vite-plugin-monkey';
 import { defineConfig } from 'vitest/config';
+import packageJson from './package.json' with { type: 'json' };
 
 export default defineConfig({
   plugins: [
     monkey({
-      build: {
-        externalGlobals: {
-          '@mozilla/readability': cdn.jsdelivr('Readability', 'Readability.min.js'),
-        },
-        fileName: 'web-printer.user.js',
-      },
       entry: 'src/main.ts',
+      build: { fileName: 'web-printer.user.js' },
       userscript: {
-        author: 'eternasuno',
-        connect: ['*'],
-        description:
-          'Merge all pages from a documentation site into a single HTML and invoke browser print/PDF export',
-        grant: [
-          'GM_xmlhttpRequest',
-          'GM_registerMenuCommand',
-          'GM_unregisterMenuCommand',
-          'GM_getValue',
-          'GM_setValue',
-        ],
-        match: ['*://*/*'],
-        name: 'Web Printer - Document Batch Print Tool',
+        name: 'Web Printer',
         namespace: 'https://github.com/eternasuno/web-printer',
-        version: '0.1.0',
+        connect: ['self'],
+        version: packageJson.version,
+        author: 'eternasuno',
+        description: 'Merge same-origin documentation pages for printing',
+        match: ['*://*/*'],
+        grant: ['GM_registerMenuCommand', 'GM_xmlhttpRequest'],
       },
     }),
   ],
   test: {
     environment: 'happy-dom',
+    environmentOptions: {
+      happyDOM: {
+        settings: {
+          disableJavaScriptFileLoading: true,
+          disableCSSFileLoading: true,
+          disableIframePageLoading: true,
+          enableImageFileLoading: false,
+          handleDisabledFileLoadingAsSuccess: true,
+        },
+      },
+    },
     include: ['test/**/*.test.ts'],
   },
 });

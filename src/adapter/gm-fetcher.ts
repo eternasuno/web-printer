@@ -1,28 +1,39 @@
-import type { Http } from '../core/port';
+import type { PageResponse } from '../core/port';
 
-type GmRequest = {
-  url: string;
-  onload?: (res: { responseText: string; status: number }) => void;
-  onerror?: (err: { error: string }) => void;
-  method?: string;
-};
-
-declare function GM_xmlhttpRequest(details: GmRequest): void;
-
-export const createGmFetcher = (): Http => ({
-  fetchPage: (url: string): Promise<string> =>
-    new Promise((resolve, reject) => {
-      GM_xmlhttpRequest({
-        method: 'GET',
-        onerror: (err) => reject(new Error(err.error || 'Network error')),
-        onload: (res) => {
-          if (res.status >= 200 && res.status < 400) {
-            resolve(res.responseText);
-          } else {
-            reject(new Error(`HTTP ${res.status}`));
-          }
-        },
-        url,
-      });
-    }),
-});
+export const fetchPage = (url: string, signal: AbortSignal): Promise<PageResponse> =>
+  new Promise((resolve, reject) => {
+    let settled = false;
+    let request: Tampermonkey.AbortHandle<void>;
+    const onAbort = (): void => {
+      if (finish()) {
+        request.abort();
+        reject(Object.assign(new Error('Cancelled'), { code: 'cancelled' }));
+      }
+    };
+    const finish = (): boolean => {
+      if (settled) return false;
+      settled = true;
+      signal.removeEventListener('abort', onAbort);
+      return true;
+    };
+    const fail = (error: Error, code: string): void => {
+      if (finish()) reject(Object.assign(error, { code }));
+    };
+    request = GM_xmlhttpRequest({
+      method: 'GET',
+      url,
+      onload: (response) => {
+        if (!finish()) return;
+        const contentType =
+          response.responseHeaders
+            .match(/^content-type\s*:\s*([^;\r\n]+)/im)?.[1]
+            ?.trim()
+            .toLowerCase() ?? '';
+        resolve({ ...response, contentType });
+      },
+      onerror: () => fail(new Error('Network error'), 'network-error'),
+      onabort: () => fail(new Error('Cancelled'), 'cancelled'),
+    });
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });

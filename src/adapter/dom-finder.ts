@@ -1,24 +1,27 @@
-import type { Dom, LinkInfo } from '../core/port';
+import type { RawLink } from '../core/port';
 
-const resolveUrl = (href: string): string | null => {
-  try {
-    return new URL(href, window.location.href).href;
-  } catch {
-    return null;
-  }
-};
-
-export const createDomFinder = (): Dom => ({
-  findLinks: (selector: string): LinkInfo[] => {
-    const anchors = document.querySelectorAll<HTMLAnchorElement>(selector);
-    const links: LinkInfo[] = [];
-    for (const a of anchors) {
-      const href = a.getAttribute('href');
-      if (!href) continue;
-      const url = resolveUrl(href);
-      if (!url) continue;
-      links.push({ text: a.textContent?.trim() || url, url });
+export const findLinks = (xpath: string, root: Document = document): RawLink[] => {
+  const evaluator = (root as Document & { evaluate?: typeof document.evaluate }).evaluate;
+  const snapshotType = root.defaultView?.XPathResult?.ORDERED_NODE_SNAPSHOT_TYPE ?? 7;
+  if (!evaluator) throw new Error('XPath is not supported');
+  const result = evaluator.call(root, xpath, root, null, snapshotType, null);
+  const links: RawLink[] = [];
+  const seen = new Set<HTMLAnchorElement>();
+  for (let i = 0; i < result.snapshotLength; i++) {
+    const node = result.snapshotItem(i);
+    if (!(node instanceof Element)) {
+      throw new Error('XPath must return elements');
     }
-    return links;
-  },
-});
+    const anchors = node.matches('a[href]') ? [node] : [...node.querySelectorAll('a[href]')];
+    for (const anchor of anchors) {
+      if (!(anchor instanceof HTMLAnchorElement) || seen.has(anchor)) continue;
+      seen.add(anchor);
+      links.push({
+        text: anchor.textContent ?? '',
+        href: anchor.getAttribute('href') ?? '',
+        downloadable: anchor.hasAttribute('download'),
+      });
+    }
+  }
+  return links;
+};
