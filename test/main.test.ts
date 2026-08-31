@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SourceLink } from '../src/core/entity';
-import type { DiscoverResult } from '../src/core/usecase';
 import { createApp } from '../src/main';
 
 const location = new URL('https://docs.test/start') as unknown as Location;
-const target = { close: vi.fn() } as unknown as Window;
-const links = (items: SourceLink[]): DiscoverResult => Object.assign(items, { truncated: false });
+const target = { close: vi.fn(), opener: window } as unknown as Window;
+const links = (items: SourceLink[]) =>
+  Object.assign(items, { truncated: false });
 
 const dependencies = () => ({
   showXPathDialog: vi.fn(() => new Promise<string | null>(() => undefined)),
@@ -16,11 +16,12 @@ const dependencies = () => ({
   showPreviewButton: vi.fn(),
   discoverLinks: vi.fn(() => links([])),
   runBatch: vi.fn(),
-  findLinks: vi.fn(),
   fetchPage: vi.fn(),
   extractArticle: vi.fn(),
+  document,
   location,
-  window: { open: vi.fn(() => target) } as unknown as Window,
+  window: { open: vi.fn(() => target) } as unknown as Window &
+    typeof globalThis,
 });
 
 describe('main app orchestration', () => {
@@ -28,12 +29,14 @@ describe('main app orchestration', () => {
     const deps = dependencies();
     let resolveXPath!: (value: string | null) => void;
     deps.showXPathDialog.mockImplementation(
-      () => new Promise<string | null>((resolve) => (resolveXPath = resolve)),
+      () => new Promise<string | null>((resolve) => (resolveXPath = resolve))
     );
     const app = createApp(deps);
     const first = app.start();
     await app.start();
-    expect(deps.showToast).toHaveBeenCalledWith('Web Printer is already running');
+    expect(deps.showToast).toHaveBeenCalledWith(
+      'Web Printer is already running'
+    );
     expect(deps.showXPathDialog).toHaveBeenCalledTimes(1);
     resolveXPath(null);
     await first;
@@ -51,7 +54,7 @@ describe('main app orchestration', () => {
       })
       .mockImplementationOnce(() => links([]))
       .mockImplementationOnce(() =>
-        links([{ text: 'Page', url: 'https://docs.test/page', selected: true }]),
+        links([{ text: 'Page', url: 'https://docs.test/page' }])
       );
     deps.showLinksDialog.mockResolvedValue({ kind: 'cancel' });
     await createApp(deps).start();
@@ -67,11 +70,13 @@ describe('main app orchestration', () => {
 
   it('supports Back and cancel without opening a popup or leaking progress', async () => {
     const deps = dependencies();
-    deps.showXPathDialog.mockResolvedValueOnce('//links').mockResolvedValueOnce(null);
+    deps.showXPathDialog
+      .mockResolvedValueOnce('//links')
+      .mockResolvedValueOnce(null);
     deps.discoverLinks.mockReturnValue(
-      Object.assign([{ text: 'Page', url: 'https://docs.test/page', selected: true }], {
+      Object.assign([{ text: 'Page', url: 'https://docs.test/page' }], {
         truncated: false,
-      }),
+      })
     );
     deps.showLinksDialog.mockResolvedValueOnce({ kind: 'back' });
     await createApp(deps).start();
@@ -84,17 +89,17 @@ describe('main app orchestration', () => {
     const deps = dependencies();
     deps.showXPathDialog.mockResolvedValue('//links');
     deps.discoverLinks.mockReturnValue(
-      Object.assign([{ text: 'Page', url: 'https://docs.test/page', selected: true }], {
+      Object.assign([{ text: 'Page', url: 'https://docs.test/page' }], {
         truncated: false,
-      }),
+      })
     );
     deps.showLinksDialog.mockResolvedValue({
       kind: 'selected',
-      links: [{ text: 'Page', url: 'https://docs.test/page', selected: true }],
+      links: [{ text: 'Page', url: 'https://docs.test/page' }],
     });
     deps.runBatch.mockImplementation(async (_urls, fetch) => {
       await expect(
-        fetch('https://docs.test/page', new AbortController().signal),
+        fetch('https://docs.test/page', new AbortController().signal)
       ).rejects.toMatchObject({ code: 'unsupported-content-type' });
       return { articles: [], failures: [] };
     });
@@ -113,38 +118,47 @@ describe('main app orchestration', () => {
     const deps = dependencies();
     deps.showXPathDialog.mockResolvedValue('//links');
     deps.discoverLinks.mockReturnValue(
-      Object.assign([{ text: 'Page', url: 'https://docs.test/page', selected: true }], {
+      Object.assign([{ text: 'Page', url: 'https://docs.test/page' }], {
         truncated: false,
-      }),
+      })
     );
     deps.showLinksDialog.mockResolvedValue({
       kind: 'selected',
-      links: [{ text: 'Page', url: 'https://docs.test/page', selected: true }],
+      links: [{ text: 'Page', url: 'https://docs.test/page' }],
     });
     deps.runBatch.mockResolvedValue({
       articles: [],
-      failures: [{ url: 'https://docs.test/page', code: 'http-error', message: 'HTTP 500' }],
+      failures: [
+        {
+          url: 'https://docs.test/page',
+          code: 'http-error',
+          message: 'HTTP 500',
+        },
+      ],
     });
     await createApp(deps).start();
+    expect(target.opener).toBeNull();
     expect(target.close).toHaveBeenCalled();
-    expect(deps.showToast).toHaveBeenCalledWith(expect.stringContaining('HTTP 500'));
+    expect(deps.showToast).toHaveBeenCalledWith(
+      expect.stringContaining('HTTP 500')
+    );
   });
 
   it('uses a preview button when the popup is blocked', async () => {
     const deps = dependencies();
     deps.showXPathDialog.mockResolvedValue('//links');
     deps.discoverLinks.mockReturnValue(
-      Object.assign([{ text: 'Page', url: 'https://docs.test/page', selected: true }], {
+      Object.assign([{ text: 'Page', url: 'https://docs.test/page' }], {
         truncated: false,
-      }),
+      })
     );
     deps.showLinksDialog.mockResolvedValue({
       kind: 'selected',
-      links: [{ text: 'Page', url: 'https://docs.test/page', selected: true }],
+      links: [{ text: 'Page', url: 'https://docs.test/page' }],
     });
     deps.window.open = vi.fn(() => null) as unknown as Window['open'];
     deps.runBatch.mockResolvedValue({
-      articles: [{ title: 'Page', content: '<p>x</p>', url: 'https://docs.test/page' }],
+      articles: [{ title: 'Page', content: '<p>x</p>' }],
       failures: [],
     });
     await createApp(deps).start();

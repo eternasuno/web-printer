@@ -1,129 +1,138 @@
-import type { Article, BatchResult, Failure, FailureCode, SourceLink } from './entity';
+import type { Article, BatchResult, Failure, FailureCode } from './entity';
 
-const limit = 200;
-const cancelled = (): Error => Object.assign(new Error('Cancelled'), { code: 'cancelled' });
+const cancelled = (): Error =>
+  Object.assign(new Error('Cancelled'), { code: 'cancelled' });
+const codeOf = (error: unknown): FailureCode =>
+  (error as { code?: FailureCode }).code ?? 'internal-error';
 const failure = (url: string, code: FailureCode, error: unknown): Failure => ({
   url,
   code,
   message: error instanceof Error ? error.message : String(error),
 });
-export type DiscoverResult = SourceLink[] & { truncated: boolean };
-export const discoverLinks = (
-  xpath: string,
-  pageUrl: string,
-  findLinks: (xpath: string) => { text: string; href: string; downloadable?: boolean }[] = () => [],
-): DiscoverResult => {
-  if (!xpath.trim()) throw new Error('XPath is required');
-  const raw = findLinks(xpath);
-  const base = new URL(pageUrl);
-  const seen = new Set<string>();
-  const links = raw.flatMap((link) => {
-    if (!link.href || link.downloadable) return [];
-    let url: URL;
-    try {
-      url = new URL(link.href, base);
-    } catch {
-      return [];
-    }
-    if (
-      !['http:', 'https:'].includes(url.protocol) ||
-      url.origin !== base.origin ||
-      url.username ||
-      url.password
-    )
-      return [];
-    url.hash = '';
-    const normalized = url.href;
-    if (seen.has(normalized)) return [];
-    seen.add(normalized);
-    return [{ text: link.text.trim() || normalized, url: normalized, selected: true }];
-  });
-  const result = links.slice(0, limit) as DiscoverResult;
-  Object.defineProperty(result, 'truncated', { value: links.length > limit, enumerable: false });
-  return result;
+const batchConfig = { concurrency: 3, interval: 500, timeout: 30000 } as const;
+
+type PageLoader = (url: string, signal: AbortSignal) => Promise<Article>;
+type ProgressValue = {
+  completed: number;
+  succeeded: number;
+  failed: number;
+  total: number;
 };
 
-const batchConfig = { concurrency: 3, interval: 500, timeout: 30000 } as const;
+const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    const abort = (): void => {
+      clearTimeout(timer);
+      reject(cancelled());
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+  });
+
+const createThrottle = (
+  signal: AbortSignal,
+  interval: number
+): (() => Promise<void>) => {
+  let lastStart = -Infinity;
+  let schedule: Promise<void> = Promise.resolve();
+  const gate = async (): Promise<void> => {
+    const delay = Math.max(0, interval - (Date.now() - lastStart));
+    if (delay) await sleep(delay, signal);
+    if (signal.aborted) throw cancelled();
+    lastStart = Date.now();
+  };
+  return () => {
+    const slot = schedule.then(gate);
+    schedule = slot.catch(() => undefined);
+    return slot;
+  };
+};
+
+const fetchWithTimeout = async (
+  load: PageLoader,
+  url: string,
+  signal: AbortSignal,
+  timeout: number
+): Promise<Article> => {
+  const controller = new AbortController();
+  const abort = (): void => controller.abort();
+  signal.addEventListener('abort', abort, { once: true });
+  if (signal.aborted) controller.abort();
+  let expired = false;
+  let rejectTimeout!: (error: Error) => void;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    rejectTimeout = reject;
+  });
+  const timer = setTimeout(() => {
+    expired = true;
+    controller.abort();
+    rejectTimeout(Object.assign(new Error('Timeout'), { code: 'timeout' }));
+  }, timeout);
+  try {
+    return await Promise.race([load(url, controller.signal), timeoutPromise]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw Object.assign(new Error(message), {
+      code: expired ? 'timeout' : codeOf(error),
+    });
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', abort);
+  }
+};
+
 export const runBatch = async (
   urls: string[],
-  fetch: (url: string, signal: AbortSignal) => Promise<Article>,
+  fetch: PageLoader,
   signal = new AbortController().signal,
-  onProgress?: (value: {
-    completed: number;
-    succeeded: number;
-    failed: number;
-    total: number;
-  }) => void,
+  onProgress?: (value: ProgressValue) => void
 ): Promise<BatchResult> => {
   const articles: (Article | undefined)[] = new Array(urls.length);
   const failures: (Failure | undefined)[] = new Array(urls.length);
   let next = 0;
-  let lastStart = -Infinity;
-  let schedule: Promise<void> = Promise.resolve();
-  const startSlot = async (): Promise<void> => {
-    const slot = schedule.then(async () => {
-      const delay = Math.max(0, batchConfig.interval - (Date.now() - lastStart));
-      if (delay)
-        await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(resolve, delay);
-          const abort = (): void => {
-            clearTimeout(timer);
-            reject(cancelled());
-          };
-          signal.addEventListener('abort', abort, { once: true });
-          if (signal.aborted) abort();
-        });
-      if (signal.aborted) throw cancelled();
-      lastStart = Date.now();
+  const throttle = createThrottle(signal, batchConfig.interval);
+  const report = (): void => {
+    if (!onProgress) return;
+    const succeeded = articles.filter(Boolean).length;
+    const failed = failures.filter(Boolean).length;
+    onProgress({
+      completed: succeeded + failed,
+      succeeded,
+      failed,
+      total: urls.length,
     });
-    schedule = slot.catch(() => undefined);
-    await slot;
+  };
+  const process = async (index: number, url: string): Promise<void> => {
+    await throttle();
+    try {
+      articles[index] = await fetchWithTimeout(
+        fetch,
+        url,
+        signal,
+        batchConfig.timeout
+      );
+    } catch (error) {
+      if (signal.aborted) throw cancelled();
+      failures[index] = failure(url, codeOf(error), error);
+    }
+    report();
   };
   const worker = async (): Promise<void> => {
     while (true) {
       if (signal.aborted) throw cancelled();
       const index = next++;
-      if (index >= urls.length) return;
-      await startSlot();
-      const controller = new AbortController();
-      const abort = (): void => controller.abort();
-      signal.addEventListener('abort', abort, { once: true });
-      if (signal.aborted) controller.abort();
-      let timedOut = false;
-      let timeoutReject!: (error: Error) => void;
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutReject = reject;
-      });
-      const timer = setTimeout(() => {
-        timedOut = true;
-        controller.abort();
-        timeoutReject(Object.assign(new Error('Timeout'), { code: 'timeout' }));
-      }, batchConfig.timeout);
-      try {
-        articles[index] = await Promise.race([
-          fetch(urls[index], controller.signal),
-          timeoutPromise,
-        ]);
-      } catch (error) {
-        if (signal.aborted) throw cancelled();
-        failures[index] = failure(
-          urls[index],
-          timedOut ? 'timeout' : ((error as { code?: FailureCode }).code ?? 'internal-error'),
-          error,
-        );
-      } finally {
-        clearTimeout(timer);
-        signal.removeEventListener('abort', abort);
-      }
-      onProgress?.({
-        completed: articles.filter(Boolean).length + failures.filter(Boolean).length,
-        succeeded: articles.filter(Boolean).length,
-        failed: failures.filter(Boolean).length,
-        total: urls.length,
-      });
+      const url = urls[index];
+      if (url === undefined) return;
+      await process(index, url);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(batchConfig.concurrency, urls.length) }, worker));
+  await Promise.all(
+    Array.from(
+      { length: Math.min(batchConfig.concurrency, urls.length) },
+      worker
+    )
+  );
   return {
     articles: articles.filter((item): item is Article => Boolean(item)),
     failures: failures.filter((item): item is Failure => Boolean(item)),

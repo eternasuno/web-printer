@@ -1,6 +1,14 @@
-import type { PageResponse } from '../core/port';
+export type PageResponse = {
+  status: number;
+  contentType: string;
+  responseText: string;
+  finalUrl: string;
+};
 
-export const fetchPage = (url: string, signal: AbortSignal): Promise<PageResponse> =>
+export const fetchPage = (
+  url: string,
+  signal: AbortSignal
+): Promise<PageResponse> =>
   new Promise((resolve, reject) => {
     let settled = false;
     let request: Tampermonkey.AbortHandle<void>;

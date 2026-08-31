@@ -4,10 +4,9 @@ export const showPreview = (target: Window, result: BatchResult): void => {
   const doc = target.document;
   doc.open();
   doc.write(
-    '<!doctype html><meta charset="utf-8"><title>Web Printer Preview</title><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src https:; style-src \'unsafe-inline\';"><div data-web-printer-preview="true"></div>',
+    '<!doctype html><meta charset="utf-8"><title>Web Printer Preview</title><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src https:; style-src \'unsafe-inline\';"><div data-web-printer-preview="true"></div>'
   );
   doc.close();
-  target.opener = null;
   const root = doc.querySelector('[data-web-printer-preview]');
   if (!root) return;
   const style = doc.createElement('style');

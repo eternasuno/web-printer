@@ -1,5 +1,6 @@
 import { Readability } from '@mozilla/readability';
 import DOMPurify from 'dompurify';
+import type { Article } from '../core/entity';
 
 const allowedTags = [
   'article',
@@ -66,6 +67,16 @@ const allowedAttrs = [
   'rowspan',
   'scope',
 ];
+const purifyConfig = {
+  ALLOWED_TAGS: allowedTags,
+  ALLOWED_ATTR: allowedAttrs,
+  ALLOW_DATA_ATTR: false,
+  RETURN_TRUSTED_TYPE: false,
+};
+
+const sanitize = (html: string): string =>
+  DOMPurify.sanitize(html, purifyConfig);
+
 const absolute = (value: string, base: string): string | undefined => {
   try {
     return new URL(value, base).href;
@@ -73,14 +84,18 @@ const absolute = (value: string, base: string): string | undefined => {
     return undefined;
   }
 };
+
 const normalizeSrcset = (value: string, base: string): string =>
   value
     .split(',')
     .flatMap((part) => {
       const match = part.trim().match(/^(\S+)(?:\s+(.+))?$/);
-      if (!match) return [];
-      const url = absolute(match[1], base);
-      return url?.startsWith('https:') ? [`${url}${match[2] ? ` ${match[2]}` : ''}`] : [];
+      const candidate = match?.[1];
+      const descriptor = match?.[2];
+      const url = candidate ? absolute(candidate, base) : undefined;
+      return url?.startsWith('https:')
+        ? [`${url}${descriptor ? ` ${descriptor}` : ''}`]
+        : [];
     })
     .join(', ');
 
@@ -93,74 +108,104 @@ const titleFromUrl = (finalUrl: string): string => {
   }
 };
 
-export const extractArticle = (html: string, finalUrl: string, order = 1) => {
-  const doc = new DOMParser().parseFromString(
-    html.replace(/<iframe\b[\s\S]*?<\/iframe\s*>/gi, '').replace(/<iframe\b[^>]*\/?>/gi, ''),
-    'text/html',
-  );
-  const base = doc.createElement('base');
-  base.href = finalUrl;
-  doc.head.prepend(base);
+const stripIframes = (html: string): string =>
+  html
+    .replace(/<iframe\b[\s\S]*?<\/iframe\s*>/gi, '')
+    .replace(/<iframe\b[^>]*\/?>/gi, '');
+
+type Parsed = NonNullable<ReturnType<Readability['parse']>>;
+
+const parseReadable = (doc: Document): Parsed => {
   let parsed: ReturnType<Readability['parse']>;
   try {
     parsed = new Readability(doc).parse();
   } catch (error) {
-    throw Object.assign(new Error(error instanceof Error ? error.message : String(error)), {
-      code: 'parse-failed',
-    });
+    throw Object.assign(
+      new Error(error instanceof Error ? error.message : String(error)),
+      {
+        code: 'parse-failed',
+      }
+    );
   }
   if (!parsed)
-    throw Object.assign(new Error('No readable content found'), { code: 'no-readable-content' });
-  const extracted = doc.createElement('div');
-  extracted.innerHTML = parsed.content || '';
-  for (const element of extracted.querySelectorAll(
-    'script, iframe, style, svg, math, object, embed',
+    throw Object.assign(new Error('No readable content found'), {
+      code: 'no-readable-content',
+    });
+  return parsed;
+};
+
+const stripDangerous = (root: HTMLElement): void => {
+  for (const element of root.querySelectorAll(
+    'script, iframe, style, svg, math, object, embed'
   ))
     element.remove();
-  extracted.querySelectorAll('*').forEach((element) => {
+  for (const element of root.querySelectorAll('*')) {
     for (const attribute of element.getAttributeNames()) {
-      if (attribute.startsWith('on') || attribute === 'style') element.removeAttribute(attribute);
-    }
-  });
-  const clean = DOMPurify.sanitize(extracted.innerHTML, {
-    ALLOWED_TAGS: allowedTags,
-    ALLOWED_ATTR: allowedAttrs,
-    ALLOW_DATA_ATTR: false,
-    RETURN_TRUSTED_TYPE: false,
-  });
-  const wrapper = doc.createElement('div');
-  wrapper.innerHTML = clean;
-  for (const element of wrapper.querySelectorAll('[href], [src], [srcset]')) {
-    for (const attr of ['href', 'src', 'srcset']) {
-      const value = element.getAttribute(attr);
-      if (!value) continue;
-      const normalized =
-        attr === 'srcset' ? normalizeSrcset(value, finalUrl) : absolute(value, finalUrl);
-      if (
-        !normalized ||
-        ((attr === 'src' || attr === 'srcset') &&
-          !normalized.split(/[, ]/)[0].startsWith('https:')) ||
-        (attr === 'href' && !/^https?:/i.test(normalized))
-      )
-        element.removeAttribute(attr);
-      else element.setAttribute(attr, normalized);
+      if (attribute.startsWith('on')) element.removeAttribute(attribute);
     }
   }
-  wrapper.querySelectorAll('a[target="_blank"]').forEach((element) => {
+};
+
+const urlValueSafe = (attr: string, value: string): boolean => {
+  if (attr === 'href') return /^https?:/i.test(value);
+  return value.split(/[, ]/)[0]?.startsWith('https:') ?? false;
+};
+
+const normalizeAttr = (element: Element, attr: string, base: string): void => {
+  const value = element.getAttribute(attr);
+  if (!value) return;
+  const normalized =
+    attr === 'srcset' ? normalizeSrcset(value, base) : absolute(value, base);
+  if (!normalized || !urlValueSafe(attr, normalized))
+    element.removeAttribute(attr);
+  else element.setAttribute(attr, normalized);
+};
+
+const normalizeUrls = (root: HTMLElement, base: string): void => {
+  for (const element of root.querySelectorAll('[href], [src], [srcset]')) {
+    for (const attr of ['href', 'src', 'srcset'])
+      normalizeAttr(element, attr, base);
+  }
+};
+
+const secureBlankTargets = (root: HTMLElement): void => {
+  for (const element of root.querySelectorAll('a[target="_blank"]')) {
     element.setAttribute('rel', 'noopener noreferrer');
-  });
-  const content = DOMPurify.sanitize(wrapper.innerHTML, {
-    ALLOWED_TAGS: allowedTags,
-    ALLOWED_ATTR: allowedAttrs,
-    ALLOW_DATA_ATTR: false,
-    RETURN_TRUSTED_TYPE: false,
-  });
+  }
+};
+
+const resolveTitle = (
+  parsed: Parsed,
+  doc: Document,
+  finalUrl: string,
+  order: number
+): string =>
+  parsed.title?.trim() ||
+  doc.title.trim() ||
+  titleFromUrl(finalUrl) ||
+  `Page ${order}`;
+
+export const extractArticle = (
+  html: string,
+  finalUrl: string,
+  order = 1
+): Article => {
+  const doc = new DOMParser().parseFromString(stripIframes(html), 'text/html');
+  const base = doc.createElement('base');
+  base.href = finalUrl;
+  doc.head.prepend(base);
+  const parsed = parseReadable(doc);
+  const extracted = doc.createElement('div');
+  extracted.innerHTML = parsed.content || '';
+  stripDangerous(extracted);
+  const wrapper = doc.createElement('div');
+  wrapper.innerHTML = sanitize(extracted.innerHTML);
+  normalizeUrls(wrapper, finalUrl);
+  secureBlankTargets(wrapper);
+  const content = sanitize(wrapper.innerHTML);
   if (!content.trim() || !wrapper.textContent?.trim())
     throw Object.assign(new Error('Empty sanitized content'), {
       code: 'sanitized-content-empty',
     });
-  return {
-    title: parsed.title?.trim() || doc.title.trim() || titleFromUrl(finalUrl) || `Page ${order}`,
-    content,
-  };
+  return { title: resolveTitle(parsed, doc, finalUrl, order), content };
 };

@@ -1,5 +1,5 @@
-export type SourceLink = { text: string; url: string; selected: boolean };
-export type Article = { title: string; content: string; url: string };
+export type SourceLink = { text: string; url: string };
+export type Article = { title: string; content: string };
 export type FailureCode =
   | 'network-error'
   | 'timeout'

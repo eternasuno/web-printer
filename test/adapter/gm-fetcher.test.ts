@@ -57,7 +57,12 @@ describe('GM fetcher', () => {
     const promise = fetchPage('/a', controller.signal);
     controller.abort();
     await expect(promise).rejects.toMatchObject({ code: 'cancelled' });
-    current.onload({ status: 200, responseText: '', responseHeaders: '', finalUrl: '/a' });
+    current.onload({
+      status: 200,
+      responseText: '',
+      responseHeaders: '',
+      finalUrl: '/a',
+    });
     expect(abort).toHaveBeenCalled();
     expect(remove).toHaveBeenCalled();
     const already = new AbortController();
