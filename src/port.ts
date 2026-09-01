@@ -2,7 +2,6 @@ import type {
   CandidateLink,
   CollectionProgress,
   ExtractedArticle,
-  FetchResponse,
   PageSnapshot,
   PrintDocument,
   SelectedPage,
@@ -13,7 +12,10 @@ export interface PageReader {
 }
 
 export interface PageFetcher {
-  fetch(url: string, timeoutMs: number): Promise<FetchResponse>;
+  fetch(
+    url: string,
+    timeoutMs: number
+  ): Promise<Tampermonkey.Response<undefined>>;
 }
 
 export interface ArticleExtractor {
@@ -35,7 +37,7 @@ export interface LinkSelector {
 export interface Preview {
   update(progress: CollectionProgress): void;
   render(document: PrintDocument): void;
-  onCancel(handler: () => void): void;
+  isCancelled(): boolean;
   isClosed(): boolean;
 }
 

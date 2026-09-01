@@ -31,17 +31,6 @@ export type SelectionState = {
   readonly canStart: boolean;
 };
 
-export type FetchResponse = {
-  readonly status: number;
-  readonly contentType: string | null;
-  readonly body: string;
-  readonly finalUrl: string;
-};
-
-export type FetchFailure =
-  | { readonly type: 'network'; readonly message: string }
-  | { readonly type: 'timeout' };
-
 export type ExtractedArticle = {
   readonly title: string | null;
   readonly documentTitle: string;

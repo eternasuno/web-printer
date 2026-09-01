@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createSelection,
-  deselectAll,
+  invertSelection,
   selectAll,
   selectedPages,
   toggleSelection,
@@ -30,15 +30,33 @@ describe('selection', () => {
     expect(selected.canStart).toBe(true);
   });
 
-  it('selects and deselects all candidates', () => {
-    const initial = createSelection(candidates);
-    const all = selectAll(initial);
-    const none = deselectAll(all);
+  it('selects all candidates', () => {
+    const all = selectAll(createSelection(candidates));
 
     expect(all.selected.size).toBe(3);
     expect(all.canStart).toBe(true);
-    expect(none.selected.size).toBe(0);
+  });
+
+  it('inverts the selection without mutating the previous state', () => {
+    const initial = createSelection(candidates);
+    const all = invertSelection(initial);
+    const none = invertSelection(all);
+
+    expect(all.selected.size).toBe(3);
+    expect(all.canStart).toBe(true);
+    expect(none.selected).toEqual(new Set());
     expect(none.canStart).toBe(false);
+    expect(initial.selected.size).toBe(0);
+  });
+
+  it('inverts a partial selection to its complement', () => {
+    let state = createSelection(candidates);
+    state = toggleSelection(state, 'https://docs.test/b');
+    state = toggleSelection(state, 'https://docs.test/c');
+
+    expect(invertSelection(state).selected).toEqual(
+      new Set(['https://docs.test/a'])
+    );
   });
 
   it('returns selected pages in candidate order rather than click order', () => {

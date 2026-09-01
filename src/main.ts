@@ -11,8 +11,6 @@ import { assemble } from './usecase/assemble';
 import { collect } from './usecase/collect';
 import { discover } from './usecase/discover';
 
-const closedCheckMs = 250;
-
 const collectionAdapters = () => ({
   fetcher: createPageFetcher(),
   extractor: createArticleExtractor(),
@@ -47,24 +45,12 @@ const run = async (): Promise<void> => {
     return;
   }
 
-  let cancelled = false;
-  preview.onCancel(() => {
-    cancelled = true;
-  });
-  const closed = window.setInterval(() => {
-    if (preview.isClosed()) {
-      cancelled = true;
-      window.clearInterval(closed);
-      notifier.show('Web Printer task cancelled');
-    }
-  }, closedCheckMs);
-
   const results = await collect(selected, collectionAdapters(), {
-    isCancelled: () => cancelled,
+    isCancelled: () => preview.isCancelled() || preview.isClosed(),
     onProgress: (progress) => preview.update(progress),
   });
-  window.clearInterval(closed);
   if (preview.isClosed()) {
+    notifier.show('Web Printer task cancelled');
     return;
   }
 

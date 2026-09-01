@@ -37,8 +37,15 @@ export const selectAll = (current: SelectionState): SelectionState =>
     new Set(current.candidates.map((candidate) => candidate.url))
   );
 
-export const deselectAll = (current: SelectionState): SelectionState =>
-  state(current.candidates, new Set());
+export const invertSelection = (current: SelectionState): SelectionState =>
+  state(
+    current.candidates,
+    new Set(
+      current.candidates
+        .filter((candidate) => !current.selected.has(candidate.url))
+        .map((candidate) => candidate.url)
+    )
+  );
 
 export const selectedPages = (current: SelectionState): SelectedPage[] =>
   current.candidates.filter((candidate) => current.selected.has(candidate.url));

@@ -16,6 +16,22 @@ const createPopup = () => {
   return { popup, popupDocument };
 };
 
+const styleOf = (page: Document, marker: string): string =>
+  [...page.querySelectorAll('style')]
+    .map((element) => element.textContent ?? '')
+    .filter((text) => text.includes(marker))
+    .join('');
+
+const block = (source: string, query: string): string => {
+  const start = source.indexOf(query);
+  if (start < 0) {
+    return '';
+  }
+  const end = source.indexOf('}}', start);
+
+  return source.slice(start, end < 0 ? undefined : end + 2);
+};
+
 describe('preview window adapter', () => {
   it('returns null when the browser blocks the popup', () => {
     expect(openPreview(() => null, 'task-id', 'Guide')).toBeNull();
@@ -62,13 +78,49 @@ describe('preview window adapter', () => {
     expect(popupDocument.querySelector('article')?.textContent).toContain(
       'Body'
     );
+    expect(
+      [...popupDocument.querySelectorAll('nav button')].map((element) =>
+        element.getAttribute('data-action')
+      )
+    ).toEqual(['print', 'close']);
+    const css = styleOf(popupDocument, '--wp-bg');
+    expect(css).toMatch(/nav\{[^}]*display: ?flex/);
+    expect(css).toMatch(/nav\{[^}]*justify-content: ?flex-end/);
+    expect(css).toMatch(/nav\{[^}]*gap: ?\.5rem/);
+  });
+
+  it('keeps screen colours readable in a dark colour scheme', () => {
+    const { popup, popupDocument } = createPopup();
+    openPreview(() => popup, 'task-id', 'Guide');
+    const css = styleOf(popupDocument, '--wp-bg');
+    const dark = block(css, '@media screen and (prefers-color-scheme:dark)');
+
+    for (const token of ['--wp-bg', '--wp-fg', '--wp-muted', '--wp-line']) {
+      expect(css).toContain(`${token}:`);
+      expect(dark).toContain(token);
+    }
+    expect(css).toMatch(
+      /body\{[^}]*background: ?var\(--wp-bg\)[^}]*color: ?var\(--wp-fg\)/
+    );
+    expect(css).toMatch(/nav\{[^}]*background: ?var\(--wp-bg\)/);
+    expect(css).toMatch(/aside\{[^}]*color: ?var\(--wp-muted\)/);
+    expect(css).toMatch(/button\{[^}]*border: ?1px solid var\(--wp-line\)/);
+  });
+
+  it('forces black on white when printing and keeps the print layout', () => {
+    const { popup, popupDocument } = createPopup();
+    openPreview(() => popup, 'task-id', 'Guide');
+    const print = block(styleOf(popupDocument, '--wp-bg'), '@media print');
+
+    expect(print).toMatch(/body\{[^}]*background: ?#fff/);
+    expect(print).toMatch(/body\{[^}]*color: ?#000/);
+    expect(print).toMatch(/nav, ?aside\{[^}]*display: ?none/);
+    expect(print).toMatch(/body\{[^}]*max-width: ?none/);
   });
 
   it('accepts cancellation only from its popup with the matching task ID', () => {
     const { popup, popupDocument } = createPopup();
     const preview = openPreview(() => popup, 'task-id', 'Guide');
-    const cancel = vi.fn();
-    preview?.onCancel(cancel);
 
     popupDocument
       .querySelector<HTMLButtonElement>('[data-action="cancel"]')
@@ -86,7 +138,7 @@ describe('preview window adapter', () => {
       })
     );
 
-    expect(cancel).not.toHaveBeenCalled();
+    expect(preview?.isCancelled()).toBe(false);
 
     window.dispatchEvent(
       new MessageEvent('message', {
@@ -95,7 +147,7 @@ describe('preview window adapter', () => {
       })
     );
 
-    expect(cancel).toHaveBeenCalledOnce();
+    expect(preview?.isCancelled()).toBe(true);
   });
 
   it('reports whether the popup was closed', () => {
@@ -103,6 +155,7 @@ describe('preview window adapter', () => {
     const preview = openPreview(() => popup, 'task-id', 'Guide');
     popup.closed = true;
 
+    expect(preview?.isCancelled()).toBe(false);
     expect(preview?.isClosed()).toBe(true);
   });
 });

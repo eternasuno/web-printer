@@ -1,7 +1,6 @@
 import type {
   CollectedPage,
   CollectionProgress,
-  FetchFailure,
   SelectedPage,
 } from '../entity';
 import type {
@@ -11,10 +10,10 @@ import type {
   PageFetcher,
 } from '../port';
 
-const concurrency = 4;
-const timeoutMs = 20_000;
-const successStatusStart = 200;
-const redirectStatusStart = 300;
+const CONCURRENCY = 4;
+const TIMEOUT_MS = 20_000;
+const SUCCESS_STATUS_START = 200;
+const REDIRECT_STATUS_START = 300;
 
 export type CollectDependencies = {
   readonly fetcher: PageFetcher;
@@ -34,17 +33,8 @@ const failed = (page: SelectedPage, reason: string): CollectedPage => ({
   reason,
 });
 
-const errorReason = (error: unknown): string => {
-  const failure = error as Partial<FetchFailure>;
-  if (failure.type === 'timeout') {
-    return 'Timeout';
-  }
-  if (failure.type === 'network') {
-    return failure.message || 'Network error';
-  }
-
-  return error instanceof Error ? error.message : 'Unexpected error';
-};
+const contentType = (headers: string): string | null =>
+  headers.match(/^content-type\s*:\s*([^\r\n]+)/im)?.[1]?.trim() ?? null;
 
 const contentTypeAllowed = (contentType: string | null): boolean => {
   if (contentType === null) {
@@ -65,20 +55,22 @@ export const collectPage = async (
   dependencies: CollectDependencies
 ): Promise<CollectedPage> => {
   try {
-    const response = await dependencies.fetcher.fetch(page.url, timeoutMs);
+    const response = await dependencies.fetcher.fetch(page.url, TIMEOUT_MS);
+    const responseContentType = contentType(response.responseHeaders);
+    const finalUrl = response.finalUrl || page.url;
     if (
-      response.status < successStatusStart ||
-      response.status >= redirectStatusStart
+      response.status < SUCCESS_STATUS_START ||
+      response.status >= REDIRECT_STATUS_START
     ) {
       return failed(page, `HTTP ${response.status}`);
     }
-    if (!contentTypeAllowed(response.contentType)) {
-      return failed(page, `Unsupported content type: ${response.contentType}`);
+    if (!contentTypeAllowed(responseContentType)) {
+      return failed(page, `Unsupported content type: ${responseContentType}`);
     }
 
     const extracted = dependencies.extractor.extract(
-      response.body,
-      response.finalUrl
+      response.responseText,
+      finalUrl
     );
     if (!extracted?.contentHtml.trim()) {
       return failed(page, 'Readability returned no content');
@@ -92,7 +84,7 @@ export const collectPage = async (
     );
     const transformed = dependencies.transformer.transform(
       extracted.contentHtml,
-      response.finalUrl,
+      finalUrl,
       title
     );
     const contentHtml = dependencies.sanitizer.sanitize(transformed);
@@ -103,10 +95,13 @@ export const collectPage = async (
     return {
       type: 'success',
       page,
-      article: { title, contentHtml, sourceUrl: response.finalUrl },
+      article: { title, contentHtml, sourceUrl: finalUrl },
     };
   } catch (error) {
-    return failed(page, errorReason(error));
+    return failed(
+      page,
+      error instanceof Error ? error.message : 'Network error'
+    );
   }
 };
 
@@ -139,7 +134,7 @@ export const collect = async (
   };
 
   await Promise.all(
-    Array.from({ length: Math.min(concurrency, pages.length) }, worker)
+    Array.from({ length: Math.min(CONCURRENCY, pages.length) }, worker)
   );
 
   for (let index = 0; index < pages.length; index += 1) {

@@ -8,13 +8,17 @@ type Popup = Pick<
 type OpenWindow = () => Popup | null;
 
 const css = `
-  body{max-width:52rem;margin:0 auto;padding:2rem;font:16px/1.6 system-ui,sans-serif;color:#181818}
-  nav{position:sticky;top:0;padding:.75rem;background:#fff;border-bottom:1px solid #ccc}
-  article.break{break-before:page}.placeholder{padding:1rem;border:1px solid #bbb}
-  pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f5f5f5;padding:1rem}
+  :root{--wp-bg:#fff;--wp-fg:#181818;--wp-muted:#555;--wp-line:#ccc;--wp-surface:#f5f5f5}
+  body{max-width:52rem;margin:0 auto;padding:2rem;font:16px/1.6 system-ui,sans-serif;background:var(--wp-bg);color:var(--wp-fg)}
+  nav{position:sticky;top:0;display:flex;align-items:center;justify-content:flex-end;gap:.5rem;padding:.75rem;background:var(--wp-bg);border-bottom:1px solid var(--wp-line)}
+  button{background:var(--wp-surface);color:var(--wp-fg);border:1px solid var(--wp-line);border-radius:.3rem;padding:.4rem .8rem;font:inherit}
+  aside{color:var(--wp-muted)}
+  article.break{break-before:page}.placeholder{padding:1rem;border:1px solid var(--wp-line)}
+  pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--wp-surface);padding:1rem}
   img{max-width:100%;height:auto}table{border-collapse:collapse;width:100%}
-  th,td{border:1px solid #888;padding:.35rem;text-align:left}
-  @media print{nav,aside{display:none}body{max-width:none;padding:0}}
+  th,td{border:1px solid var(--wp-line);padding:.35rem;text-align:left}
+  @media screen and (prefers-color-scheme:dark){:root{color-scheme:dark;--wp-bg:#181818;--wp-fg:#eaeaea;--wp-muted:#a8a8a8;--wp-line:#555;--wp-surface:#242424}}
+  @media print{:root{color-scheme:light}nav,aside{display:none}body{max-width:none;padding:0;background:#fff;color:#000}}
 `;
 
 const action = (
@@ -107,10 +111,12 @@ export const openPreview = (
   page.head.append(style);
   page.body.replaceChildren(nav, root);
 
-  let cancelHandler = (): void => undefined;
+  let cancelled = false;
   window.addEventListener(
     'message',
-    receiveCancel(popup, taskId, () => cancelHandler())
+    receiveCancel(popup, taskId, () => {
+      cancelled = true;
+    })
   );
 
   return {
@@ -127,9 +133,7 @@ export const openPreview = (
       root.replaceChildren(summary(page, output));
       root.append(...output.items.map((item) => renderItem(page, item)));
     },
-    onCancel: (handler) => {
-      cancelHandler = handler;
-    },
+    isCancelled: () => cancelled,
     isClosed: () => popup.closed,
   };
 };

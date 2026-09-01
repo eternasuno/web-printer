@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import type { FetchResponse } from '../../src/entity';
 import {
   type CollectDependencies,
   collect,
@@ -12,15 +11,21 @@ const page = (order: number) => ({
   order,
 });
 
-const dependencies = (
-  response: FetchResponse = {
+const response = (
+  values: Partial<Tampermonkey.Response<undefined>> = {}
+): Tampermonkey.Response<undefined> =>
+  ({
     status: 200,
-    contentType: 'text/html',
-    body: '<main><p>Body</p></main>',
+    responseHeaders: 'Content-Type: text/html',
+    responseText: '<main><p>Body</p></main>',
     finalUrl: 'https://docs.test/final',
-  }
+    ...values,
+  }) as Tampermonkey.Response<undefined>;
+
+const dependencies = (
+  fetchResponse: Tampermonkey.Response<undefined> = response()
 ): CollectDependencies => ({
-  fetcher: { fetch: async () => response },
+  fetcher: { fetch: async () => fetchResponse },
   extractor: {
     extract: () => ({
       title: 'Article',
@@ -42,12 +47,10 @@ describe('collectPage', () => {
         fetch: async (_url: string, timeout: number) => {
           calls.push(`fetch:${timeout}`);
 
-          return {
-            status: 200,
-            contentType: 'text/html; charset=utf-8',
-            body: '<p>Raw</p>',
-            finalUrl: 'https://docs.test/final',
-          };
+          return response({
+            responseHeaders: 'Content-Type: text/html; charset=utf-8',
+            responseText: '<p>Raw</p>',
+          });
         },
       },
       extractor: {
@@ -90,12 +93,13 @@ describe('collectPage', () => {
   });
 
   it.each([199, 300, 404, 500])('rejects HTTP status %s', async (status) => {
-    const deps = dependencies({
-      status,
-      contentType: 'text/html',
-      body: '<p>Error</p>',
-      finalUrl: 'https://docs.test/error',
-    });
+    const deps = dependencies(
+      response({
+        status,
+        responseText: '<p>Error</p>',
+        finalUrl: 'https://docs.test/error',
+      })
+    );
 
     await expect(collectPage(page(0), deps)).resolves.toMatchObject({
       type: 'failure',
@@ -108,12 +112,13 @@ describe('collectPage', () => {
     async (contentType) => {
       const result = await collectPage(
         page(0),
-        dependencies({
-          status: 200,
-          contentType,
-          body: '<p>Body</p>',
-          finalUrl: 'https://docs.test/page',
-        })
+        dependencies(
+          response({
+            responseHeaders: contentType ? `Content-Type: ${contentType}` : '',
+            responseText: '<p>Body</p>',
+            finalUrl: 'https://docs.test/page',
+          })
+        )
       );
 
       expect(result.type).toBe('success');
@@ -123,12 +128,13 @@ describe('collectPage', () => {
   it('rejects an explicit non-HTML content type before extraction', async () => {
     const result = await collectPage(
       page(0),
-      dependencies({
-        status: 200,
-        contentType: 'application/pdf',
-        body: '%PDF',
-        finalUrl: 'https://docs.test/file.pdf',
-      })
+      dependencies(
+        response({
+          responseHeaders: 'Content-Type: application/pdf',
+          responseText: '%PDF',
+          finalUrl: 'https://docs.test/file.pdf',
+        })
+      )
     );
 
     expect(result).toMatchObject({
@@ -189,12 +195,7 @@ describe('collect', () => {
       await new Promise((resolve) => setTimeout(resolve, 2));
       active -= 1;
 
-      return {
-        status: 200,
-        contentType: 'text/html',
-        body: '<p>Body</p>',
-        finalUrl: url,
-      };
+      return response({ finalUrl: url });
     };
 
     const result = await collect(
@@ -213,15 +214,10 @@ describe('collect', () => {
     const deps = dependencies();
     deps.fetcher.fetch = async (url: string) => {
       if (url.endsWith('/1')) {
-        throw { type: 'network', message: 'offline' };
+        throw new Error('offline');
       }
 
-      return {
-        status: 200,
-        contentType: 'text/html',
-        body: '<p>Body</p>',
-        finalUrl: url,
-      };
+      return response({ finalUrl: url });
     };
 
     const result = await collect([page(0), page(1), page(2)], deps, {
@@ -248,12 +244,7 @@ describe('collect', () => {
       started += 1;
       await gate;
 
-      return {
-        status: 200,
-        contentType: 'text/html',
-        body: '<p>Body</p>',
-        finalUrl: url,
-      };
+      return response({ finalUrl: url });
     };
 
     const pending = collect(
