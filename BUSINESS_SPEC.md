@@ -1,597 +1,620 @@
-# Web Printer 重构业务说明书
+# Web Printer MVP 业务说明书
 
-- 文档状态：Draft，待最终审核
-- 目标版本：1.0.0 重构版
-- 产品形态：Tampermonkey / Violentmonkey userscript
-- 产品范围：只实现“XPath 发现链接 → 选择页面 → 批量处理 → 安全预览 → 打印”的核心闭环
-- 重建门禁：产品所有者批准本文并再次授权删除前，不修改或删除现有代码
+- 文档状态：已确认，待实施授权
+- 产品形态：Tampermonkey userscript
+- 已验证目标：最新版 Firefox + Tampermonkey
+- 后续兼容目标：最新版 Chrome、Safari + Tampermonkey
+- 首批验收站点：Solid 2、Effect v4 文档
+- 实施门禁：未经产品所有者明确授权，不删除或修改源码与测试
 
 ## 1. 产品定义
 
-Web Printer 是一个本地运行的用户脚本。用户在当前文档页面输入一个 XPath 表达式发现同源文档链接，选择需要的页面后，脚本抓取页面、提取正文、净化不可信 HTML，最后生成只包含失败日志、文章标题、正文和打印按钮的预览页。
-
-### 1.1 核心价值
+Web Printer 是一个仅供个人使用的 userscript。它从当前页面发现同源链接，让用户选择页面，批量抓取并使用 Readability 提取正文，最后在新窗口生成适合浏览器打印或保存 PDF 的合并文档。
+
+核心流程：
+
+```text
+打开目录页
+→ 从 Tampermonkey 菜单启动
+→ 发现当前 DOM 中的同源链接
+→ 用户确认页面
+→ 抓取、提取并净化正文
+→ 新窗口预览
+→ 浏览器打印或保存 PDF
+```
+
+重写不兼容旧业务代码、UI、设置或存储数据。保留正确的 Vite、TypeScript、Vitest、Biome 和 userscript 构建配置。
 
-- 不需要服务端，正文只在当前浏览器中处理。
-- 使用浏览器原生 XPath 精确发现链接，不引入选择器依赖。
-- 多个页面按 XPath 返回的文档顺序合并。
-- 远程 HTML 经安全净化后才进入预览。
-- 单页失败不影响成功页面，失败原因清楚可见。
-- 用户可以随时取消正在执行的唯一任务。
-
-### 1.2 目标用户
-
-- 需要将在线技术文档保存为 PDF 的开发者和技术用户。
-- 需要处理当前浏览器可访问的公开或登录后文档的用户。
-- 能够为目标文档导航提供 XPath 表达式的用户。
+## 2. 非目标
 
-### 1.3 非目标
+MVP 不实现：
 
-V1 不负责：
+- XPath、CSS selector 或目录容器输入
+- 自动识别侧边栏或文档框架
+- 递归爬站、sitemap 导入或跨源抓取
+- 登录页面、付费墙或访问控制绕过
+- 站点专用适配器
+- Readability 之外的提取器或正文选择兜底
+- 自动或手动重试
+- 可配置并发、超时或请求头
+- 页面搜索、过滤、分组、拖拽排序或选择集保存
+- 源站 CSS、字体或交互复制
+- 自定义打印 CSS 或设置持久化
+- 图片下载、base64 内嵌或离线资源包
+- 内建 PDF 引擎或 HTML 下载
+- 合并文档内部链接重映射
+- 旧数据迁移
 
-- 自动发现链接或支持 CSS selector。
-- 绕过登录、验证码、WAF、付费墙或访问控制。
-- 递归访问已抓取页面并继续发现链接。
-- 自动翻页、点击“Load more”或触发无限滚动。
-- 执行目标页面 JavaScript 以等待 SPA 内容。
-- 抓取跨源页面。
-- 保存、暂停、恢复或重试任务。
-- 保存任务历史或文章正文。
-- 自定义打印 CSS。
-- 在预览中删除文章、调整顺序或重试单篇。
-- 复刻来源网站的样式和交互。
-- 合并表单、iframe、视频、Canvas、WebGL 等交互内容。
-- 提供云端同步、云端 PDF 或正文托管。
+## 3. 运行环境与入口
 
-## 2. 已确认的产品决策
+- userscript 匹配所有 HTTP/HTTPS 页面。
+- 只注册一个 Tampermonkey 菜单命令。
+- 页面加载时不扫描 DOM、不发起请求、不显示悬浮按钮。
+- 只支持公开页面。
+- 首先在最新版 Firefox + Tampermonkey 上人工验收。
+- Chrome 和 Safari 在实际通过验证前只能称为兼容目标。
 
-1. **链接发现**：V1 只支持一个由用户输入的 XPath 表达式，不支持 Auto 或 CSS 模式。
-2. **域范围**：只发现和抓取与当前页面 same-origin 的链接。
-3. **远程资源**：保留普通链接；允许 HTTPS 图片；不加载来源字体、样式、iframe、音视频及其他嵌入资源。
-4. **任务状态**：完全不持久化。失败、取消、刷新或关闭后释放并清除活动任务、队列、文章、请求和任务锁；失败信息只能通过非持久化 UI 展示。
-5. **并行任务**：同一页面同时最多只有一个活动任务。
-6. **任务控制**：只支持取消，不支持暂停、继续或恢复。
-7. **部分失败**：成功页面继续生成预览，同时显示失败日志，不提供重试。
-8. **标题回退**：依次使用 Readability 标题、页面 `<title>`、最终 URL 的可读路径、`Page N`。
-9. **默认选中**：XPath 返回的有效同源链接默认全部选中。
-10. **来源 URL**：仅作为内部来源信息，用于 URL 解析和错误日志，不显示在文章或打印结果中。
-11. **选择界面**：不提供搜索、筛选、排序或顺序编辑。
-12. **预览界面**：只显示失败日志、文章标题、文章正文和 Print 按钮。
-13. **重定向**：不提供重定向授权、重试或策略配置。
-14. **远程图片**：采用固定策略，不提供图片开关。
-15. **打印样式**：只提供内置默认样式，不支持自定义 CSS。
-16. **兼容性**：不迁移或读取旧版设置和存储数据。
-17. **依赖**：重建时升级全部直接依赖到当时的最新稳定版本并锁定。
+## 4. 链接发现
 
-## 3. XPath 链接发现
+### 4.1 页面输入
 
-### 3.1 原生能力
+外部 DOM adapter 按文档顺序读取当前页面：
 
-使用浏览器原生 `document.evaluate()` 执行 XPath，不引入 XPath 第三方库。
+- 页面 URL
+- `document.title`
+- 所有 `<a href>`
+- 每个链接的 `textContent`、`aria-label` 和子图片 `alt`
 
-界面只提供：
+业务用例处理这些项目自有数据，不直接读取 `Document`。
 
-- 一个 XPath 输入框。
-- Find Links 按钮。
-- Cancel 按钮。
-- 简短示例，例如 `//nav//a[@href]`。
+### 4.2 候选规则
 
-V1 不提供自动发现、CSS selector、模式切换、可视化 XPath 生成器或站点规则库。
+只保留：
 
-### 3.2 XPath 输入规则
+- `http:` 或 `https:` URL
+- 与当前页面同源的 URL
 
-- 输入不能为空。
-- 表达式必须返回节点集合或可遍历节点结果。
-- 返回节点若为 `<a>`，读取自身 href。
-- 返回节点若为其他元素，读取其内部所有 `<a href>`。
-- 不支持字符串、数字或布尔结果。
-- 保持 XPath 返回节点及其内部链接的文档顺序。
-- XPath 语法或结果类型错误必须显示在原对话框内。
-- 错误时保留输入值和焦点，不产生未处理异常。
+不限制路径前缀。导航、正文、页眉或页脚中的同源链接均可能成为候选，由用户自行排除。
 
-### 3.3 结果限制
+排除：
 
-- 只处理当前页面已经渲染的 DOM。
-- 不执行链接、不触发页面交互、不递归发现。
-- 排除同页 fragment 和 `[download]` 链接。
-- 最多保留 200 个有效候选；超过时截断并提示用户缩小 XPath 范围。
-- 所有结果仍必须经过 URL 解析、same-origin 过滤和去重。
-- 发现结果必须由用户确认后才能抓取。
+- 纯 fragment 链接
+- 外部链接
+- 无法解析的链接
+- 常见图片、音视频、字体、压缩包、可执行文件和 PDF
 
-## 4. URL 处理和域范围
+至少排除以下扩展名，匹配忽略大小写：
 
-### 4.1 same-origin 定义
+```text
+.pdf
+.png .jpg .jpeg .gif .webp .avif .svg .ico
+.mp3 .wav .ogg .mp4 .webm
+.woff .woff2 .ttf .otf
+.zip .tar .gz .rar .7z
+.exe .dmg .pkg .deb .rpm
+```
 
-使用浏览器标准定义：
+不主动加入当前页面；如果 DOM 中存在明确指向当前页面的普通链接，该链接仍可成为候选。
 
-`scheme + hostname + effective port`
+### 4.3 URL 规范化与去重
 
-HTTP 与 HTTPS、不同子域或不同非默认端口均不属于 same-origin。
+1. 以当前页面 URL 为 base 解析相对 URL。
+2. 删除 fragment。
+3. 删除追踪参数，参数名匹配忽略大小写：
+   - `utm_*`
+   - `ref`
+   - `source`
+   - `campaign`
+   - `fbclid`
+   - `gclid`
+4. 保留其他 query，且不主动重排参数。
+5. 去重时忽略非根路径末尾的 `/`。
+6. 请求 URL 保留第一次出现的规范化形式。
+7. 保留第一次出现的位置和 DOM 顺序。
 
-### 4.2 候选 URL 规则
+### 4.4 链接名称
 
-1. 以当前页面 URL 为 base 解析相对 href。
-2. 只接受 `http:` 和 `https:`。
-3. 只接受与当前页面 same-origin 的 URL。
-4. 删除 fragment；V1 不支持页内片段抓取。
-5. 保留 query，不擅自删除参数。
-6. 规范化主机名和默认端口。
-7. 按规范化 URL 去重，保留第一次出现的位置和文字。
-8. URL 含 username 或 password 时排除。
-9. 无法解析的 URL 排除。
+名称按以下顺序回退：
 
-### 4.3 重定向边界
-
-V1 不实现重定向授权、重试、策略配置或相关 UI。
+1. `textContent`
+2. `aria-label`
+3. 子图片 `alt`
+4. URL pathname
+5. 完整 URL
 
-抓取器可以遵循 userscript 管理器的标准重定向行为，但最终响应 URL 必须仍与当前页面 same-origin，否则该页面失败且不进入 Readability。最终 URL 只在内存中用于相对资源解析和失败日志。
+名称去除首尾空白，并把连续空白折叠为一个空格。
 
-## 5. 核心业务对象
+没有候选链接时不打开空对话框，不自动处理当前页面，只显示轻量 toast。
 
-### 5.1 SourceLink
-
-- 显示文本。
-- 规范化 URL。
-- 文档顺序。
-- 是否选中。
+## 5. 页面选择
 
-### 5.2 PageTask
+使用当前页面中的原生模态 `<dialog>`。
 
-只存在于当前运行内存：
+每项显示：
 
-- 请求 URL。
-- 最终 URL。
-- 状态：waiting、running、succeeded、failed、cancelled。
-- HTTP 状态。
-- Content-Type。
-- 失败代码和安全日志文本。
-- 提取后的 Article。
-
-### 5.3 Article
-
-- 标题。
-- 已净化正文 HTML。
-- 请求 URL 和最终 URL，仅供内部使用。
-- XPath 结果顺序。
-
-### 5.4 FailureCode
-
-至少区分：
-
-- `network-error`
-- `timeout`
-- `http-error`
-- `cross-origin-redirect`
-- `unsupported-content-type`
-- `parse-failed`
-- `no-readable-content`
-- `sanitized-content-empty`
-- `cancelled`
-- `internal-error`
-
-UI 文案不能作为程序判断条件。
-
-## 6. 完整业务流程
-
-### 6.1 初始化
-
-1. DOM 可用后只注册“Web Printer”菜单。
-2. 预览页面不得再次初始化主脚本菜单和页面 UI。
-3. 初始化不自动发现或抓取页面。
-4. 不读取旧版 storage，不执行数据迁移。
-
-### 6.2 启动
-
-1. 用户点击“Web Printer”。
-2. 如果当前页面已有活动任务，拒绝第二次启动并提示任务正在运行。
-3. 创建当前任务的内存状态和独立 AbortController。
-4. 打开 XPath 输入对话框并等待用户提交。
-5. 启动失败时显示错误并清除任务状态。
-
-任务状态只存在于当前页面内存。刷新、关闭页面或浏览器重启后无需恢复。
-
-### 6.3 发现和选择
-
-1. 使用用户输入的一个 XPath 表达式发现候选元素。
-2. 执行 URL 解析、same-origin 过滤和去重。
-3. 无结果时保留对话框，允许修改 XPath 后重新发现。
-4. 显示候选链接 checkbox 列表。
-5. 有效候选默认全部选中。
-6. 界面只支持单项选择、全选、全不选、返回修改 XPath 和取消。
-7. 不支持搜索、筛选、排序或顺序编辑。
-8. 最终顺序固定为 XPath 结果的文档顺序。
-
-### 6.4 执行
-
-1. 用户确认选择后，在用户手势内同步预创建空白预览窗口。
-2. 按选择顺序创建 PageTask。
-3. 使用有限并发抓取页面。
-4. 请求完成顺序不改变输出顺序。
-5. 单页失败记录失败日志，并继续处理其他页面。
-6. 进度按已进入终态的任务数计算，不按成功文章数计算。
-7. 进度 UI 显示 completed、succeeded、failed 和 total。
-8. 晚到回调不得覆盖 timeout、cancelled 或其他终态。
-
-### 6.5 取消
-
-1. 运行界面提供 Cancel。
-2. Cancel 停止启动新请求。
-3. Cancel 调用所有在途 GM 请求的 `abort()`。
-4. 请求间隔 delay 和 timeout 监听 AbortSignal。
-5. 取消后关闭进度 UI 和空白预览窗口。
-6. 清除全部文章、失败日志、队列和活动任务状态。
-7. 取消后不显示部分结果，也不允许恢复。
-
-### 6.6 完成和失败
-
-- 全部成功：生成预览。
-- 部分成功：在预览顶部显示失败日志，随后显示成功文章。
-- 全部失败：在来源页面显示非持久化失败日志，关闭空白预览窗口并清除活动任务状态。
-- 任务级内部错误：中止全部在途请求，显示错误并清除任务状态。
-- 任何结束路径都必须释放活动任务锁。
-- 不提供自动或手动重试。
-
-### 6.7 Popup blocked
-
-如果预创建窗口被拦截，任务仍继续。任务成功后在来源页面显示一个需要用户点击的 Open Preview 操作，复用当前内存中的结果，不重新抓取。该操作不属于预览内容，页面刷新后结果可以丢失。
-
-### 6.8 预览内容
-
-预览页只包含：
-
-1. 部分失败时的失败日志。
-2. 每篇文章的标题。
-3. 每篇文章的正文。
-4. Print 按钮。
-
-预览页不包含来源 URL、资源警告、目录、删除、调序、重试、设置、历史或恢复入口。打印只能由用户点击 Print 后触发。
-
-## 7. 网络处理
-
-### 7.1 默认参数
-
-- 全局并发：3。
-- 请求启动间隔：500 ms。
-- 单请求超时：30 秒。
-- 不自动重试。
-
-V1 不提供设置界面。参数作为内置常量，后续版本如有明确需求再开放配置。
-
-### 7.2 响应校验
-
-进入正文提取前必须满足：
-
-- HTTP 最终状态为 2xx。
-- 最终 URL 与当前页面 same-origin。
-- Content-Type 为 `text/html`；Content-Type 缺失时只允许通过受控检查确认 HTML。
-- 响应未被取消。
-
-3xx 不作为正文结果；4xx 和 5xx 不进入 Readability。
-
-### 7.3 超时
-
-超时必须：
-
-- 从真实请求开始时计时。
-- 调用底层 GM request 的 `abort()`。
-- 将页面标记为 `timeout`。
-- 释放并发槽。
-- 忽略晚到回调。
-
-单页超时不终止整批任务。
-
-## 8. 内容处理流水线
-
-固定顺序：
-
-1. 校验响应状态、最终 URL 和 Content-Type。
-2. 以最终响应 URL 建立解析上下文。
-3. 使用 Readability 提取标题和正文。
-4. 将允许的 URL 属性绝对化。
-5. 使用成熟 allowlist sanitizer 净化正文。
-6. 对净化后的 URL 再做协议和资源检查。
-7. 生成 Article。
-8. 按 XPath 结果顺序加入预览。
-
-Readability 是正文提取器，不是安全净化器。
-
-### 8.1 URL 绝对化
-
-以每篇页面的最终 URL 为 base，至少处理：
-
-- `a[href]`
-- `img[src]`
-- `img[srcset]`
-- `source[src]`
-- `source[srcset]`
-
-使用标准 URL API，不使用合并文档的单一 `<base>`。无法解析的 URL 属性移除。fragment-only 链接仅在可安全映射到当前文章锚点时保留，否则移除。
-
-### 8.2 HTML 允许列表
-
-允许：
-
-- `article`、`section`、`div`、`span`
-- `h1`–`h6`、`p`、`br`、`hr`
-- `ul`、`ol`、`li`、`dl`、`dt`、`dd`
-- `strong`、`em`、`b`、`i`、`u`、`s`、`mark`、`small`、`sub`、`sup`
-- `pre`、`code`、`kbd`、`samp`
-- `blockquote`、`q`
-- `table`、`caption`、`thead`、`tbody`、`tfoot`、`tr`、`th`、`td`
-- `figure`、`figcaption`
-- `a`、`img`、`picture`、`source`
-
-### 8.3 必须移除
-
-至少移除：
-
-- `script`、`noscript`
-- `iframe`、`frame`、`object`、`embed`
-- `form`、`input`、`button`、`select`、`textarea`
-- `meta`、`base`、`link`
-- 来源 `style` 和内联 `style` 属性
-- `audio`、`video`、`canvas`
-- 未允许的 SVG 和 MathML
-- 所有 `on*` 事件属性
-- `srcdoc`
-- 未列入允许列表的属性
-- `javascript:`、`vbscript:`、`file:`、`blob:` 和未知协议
-
-### 8.4 链接和图片
-
-- 普通链接允许 `http:` 和 `https:`。
-- `<img>` 和 `<picture>` 内 `<source>` 的 `src`、`srcset` 只允许 `https:`。
-- `data:` 图片禁止。
-- 图片限制在打印页面宽度内。
-- 不提供远程图片开关。
-- 不下载或内嵌图片。
-- 不加载来源字体、样式、iframe、音视频或其他嵌入资源。
-- 外部链接不得获得预览窗口的 opener 能力。
-
-## 9. 默认打印样式
-
-V1 只提供项目内置的固定打印样式，不提供设置菜单、CSS 编辑器、CSS storage 或恢复默认操作。
-
-打印规则：
-
-- Print 工具栏和失败日志在打印时隐藏。
-- 文章默认另起一页，首篇除外。
-- 长代码块允许跨页。
-- 图片限制在页面宽度内。
-- 表格支持换行和安全分页。
-- 链接在 PDF 中保持可点击。
-- 不显示来源 URL。
-
-## 10. 预览安全
-
-- 预览与来源页面 DOM 隔离。
-- 预览窗口不允许来源内容访问 `window.opener`。
-- 来源正文不能覆盖或伪造 Print 控件。
-- 使用限制性 CSP 作为纵深防御，不能替代 sanitizer。
-- 不执行来源脚本或复制来源 CSP。
-- userscript 不在预览页递归初始化主流程。
-- 标题和失败日志使用与输出上下文匹配的安全写入方式。
-
-## 11. 持久化边界
-
-V1 不需要 GM storage：
-
-- 不保存 XPath。
-- 不保存网络参数。
-- 不保存 CSS。
-- 不保存任务、文章、日志或历史。
-- 不读取或迁移 `wp-custom-css`、`wp-batch-config` 等旧版数据。
-- 重建后的项目采用全新默认行为，旧版存储值保持未使用状态即可。
-
-## 12. Userscript 权限
-
-只保留实际需要的能力：
-
-- `GM_registerMenuCommand`：启动入口。
-- `GM_xmlhttpRequest`：抓取用户选择的 same-origin 页面并支持 abort。
-
-不申请 storage、设置菜单或未使用的 grant。Readability 和 sanitizer 打包进 userscript，不使用运行时 CDN。发布产物中的权限、版本和依赖必须可检查、可复现。
-
-## 13. UI 与无障碍
-
-- 全流程可仅用键盘完成。
-- XPath 和链接选择对话框具有 dialog 语义、标题关联和模态状态。
-- 焦点进入、圈闭和关闭后恢复正确。
-- XPath 输入具有 label，错误与字段关联。
-- 进度具有 progressbar/status 语义。
-- 失败日志通过可访问状态区域呈现。
-- 状态不只依赖颜色。
-- 图标按钮具有可访问名称，不使用 emoji 作为功能图标。
-- Select All 的 checked/indeterminate 状态正确。
-- 支持 200% 缩放和高对比度。
-
-## 14. 非功能要求
-
-### 14.1 性能
-
-- XPath 过滤后最多处理 200 个候选。
-- 100 页任务严格遵守并发上限。
-- 页面完成后尽快释放原始响应字符串。
-- Cancel 后 1 秒内停止启动新请求。
-- 预览 100 篇常规文档仍可滚动和打印。
-
-### 14.2 可靠性
-
-- XPath 文档顺序和输出顺序确定。
-- 单页失败不影响其他页面。
-- 每个 PageTask 进入唯一终态。
-- 晚到回调不改变终态。
-- 任意退出路径都释放请求、timer、进度 UI、占位窗口和任务锁。
-- 重复启动不会创建第二个活动任务。
-- 任务结束后不残留可恢复状态。
-
-### 14.3 可维护性
-
-- 核心调度、URL 规则和稳定输出顺序不直接依赖 DOM、GM 全局或 Window。
-- XPath DOM、网络、Readability、sanitizer 和预览分别有明确边界。
-- 采用满足核心流程的最小目录和抽象。
-- 核心用例覆盖成功、页面失败、取消和边界测试。
-
-## 15. 依赖升级策略
-
-重建开始时采用 npm registry 当时的最新稳定版本：
-
-- TypeScript
-- Vite
-- vite-plugin-monkey
-- Vitest
-- DOM 测试环境
-- Biome
-- Mozilla Readability
-- Tampermonkey 类型声明
-- 成熟 HTML sanitizer
+- 复选框
+- 链接名称
+- URL pathname
+- 悬停时的完整 URL
 
 规则：
 
-- 不使用 beta、rc 或 nightly，除非单独批准。
-- `package.json` 不长期声明 `latest`。
-- 写入明确版本或受控 semver 范围。
-- 提交 lockfile，使用 frozen lockfile 安装。
-- package version 是产品版本单一来源。
-- userscript `@version` 从 package version 生成。
-- Git tag、package version 和 userscript version 一致。
-- Readability 和 sanitizer 打包进入 userscript。
+- 默认全部不选。
+- 支持单项选择、Select all、Deselect all、Start 和 Close。
+- Select all 选择所有候选。
+- 没有选中项时禁用 Start。
+- 显示选中数量。
+- 最终顺序保持候选 DOM 顺序，而非点击顺序。
+- Escape 可关闭，并正确恢复焦点。
 
-## 16. 测试策略
+不提供搜索、过滤、分组或排序。
 
-### 16.1 XPath 与 URL
+## 6. 预览窗口
 
-- 空 XPath、合法 XPath、非法 XPath。
-- 节点集合、单节点、容器节点和不支持的结果类型。
-- XPath 返回顺序稳定。
-- 相对 URL、same-origin、跨源、非 HTTP(S)、fragment 和去重。
-- 候选数量上限。
+用户点击 Start 时必须在该用户手势中同步调用 `window.open()`。
 
-### 16.2 批处理
+若窗口被拦截：
 
-- 乱序完成时保持 XPath 顺序。
-- 并发和请求间隔符合内置参数。
-- 单页 HTTP、网络、timeout、跨源重定向、解析和净化失败不影响其他页面。
-- timeout 调用真实 abort。
-- Cancel 中止所有在途请求并清空任务状态。
-- 第二次启动被运行锁拒绝。
-- 部分失败显示日志和成功文章。
-- 全部失败不生成文章预览。
+- 不开始抓取。
+- 不关闭选择对话框。
+- 使用 toast 提示用户允许弹窗。
 
-### 16.3 内容安全
+窗口成功打开后：
 
-- 相对 `href/src/srcset` 以各自 finalUrl 绝对化。
-- `<script>`、事件属性、`javascript:`、`srcdoc`、危险 SVG 等不能执行。
-- 来源 CSS 不进入预览。
-- 标题和日志不能逃逸输出上下文。
-- 未允许的远程资源不会加载。
-- 预览不能控制来源窗口。
+- 关闭选择对话框。
+- 立即显示标题、进度和 Cancel。
+- 抓取逻辑仍运行在来源页面 userscript 中。
+- 全部任务结束后按选择顺序一次性渲染最终文档。
 
-### 16.4 浏览器和打印
+抓取期间关闭预览窗口等同取消任务。
 
-至少完成：
+## 7. 页面收集
 
-- Tampermonkey + Chromium 冒烟。
-- Tampermonkey + Firefox 冒烟。
-- Violentmonkey + Chromium 冒烟。
-- Violentmonkey + Firefox 冒烟。
-- 长代码、宽表格、大图、中文、无标题和多页正文打印样本。
-- 自动化无障碍扫描和一次人工键盘检查。
+收集一个页面包含完整处理链：
 
-## 17. 验收标准
+```text
+fetch
+→ 验证 HTTP 状态与 Content-Type
+→ Readability 提取
+→ 资源和链接 URL 转换
+→ 重复 h1 处理
+→ DOMPurify 净化
+→ 验证正文
+→ 生成成功或失败结果
+```
 
-### 17.1 核心流程
+### 7.1 请求
 
-- 用户输入一个 XPath 后发现链接。
-- 非法 XPath 保留对话框并显示错误。
-- 只展示 same-origin 的 HTTP(S) 候选。
-- 候选按 XPath 文档顺序展示并默认选中。
-- 用户确认后开始唯一活动任务。
-- 输出文章顺序与候选顺序一致。
-- 部分失败时显示失败日志和成功文章。
-- 全部失败时显示日志并退出。
-- Cancel 后无请求、timer、文章或任务状态残留。
-- 成功后预览只显示失败日志、标题、正文和 Print。
+- 只使用 `GM_xmlhttpRequest`。
+- 固定并发数为 4。
+- 单页超时为 20 秒。
+- 不重试。
+- 单页失败不终止其他页面。
+- 请求完成顺序不改变输出顺序。
 
-### 17.2 网络和安全
+GM fetch adapter 只负责：
 
-- 并发不超过内置值。
-- timeout 和 Cancel 真实中止请求。
-- 非 2xx、非 HTML及跨源最终 URL 不进入 Readability。
-- 所有正文经过 URL 绝对化和 sanitizer。
-- 恶意 fixture 在预览中不能执行。
-- 远程资源符合固定策略。
-- 预览窗口与来源窗口隔离。
+- 把回调 API 转为 Promise
+- 把网络错误和超时转换为项目错误类型
+- 解析响应头
+- 返回项目自有响应数据
 
-### 17.3 工程和发布
+业务用例负责：
 
-- lint、strict typecheck、测试和 production build 全部通过。
-- metadata 自动校验通过。
-- 四个目标 userscript/浏览器组合冒烟通过。
-- frozen lockfile 构建可复现。
-- tag、package 和 userscript version 一致。
-- 发布工作流先 verify 再 build。
-- 发布产物保持 `dist/web-printer.user.js`。
+- 非 `2xx` 响应失败
+- 接受 `text/html` 和 `application/xhtml+xml`
+- 缺少 `Content-Type` 时仍尝试解析
+- 明确为其他类型时失败
+- 不执行重试
 
-## 18. 重建门禁
+### 7.2 Readability
 
-### Gate 0：说明书批准
+只使用 `@mozilla/readability` 提取正文。
 
-产品所有者明确批准本文。批准前不删除或修改现有源码。
+Readability adapter 接收原始 HTML 和来源 URL，在内部创建 `Document`，返回项目自有的标题和 HTML 字符串。
 
-### Gate 1：旧版冻结
+以下情况提取失败：
 
-- 记录当前 commit。
-- 保留可安装 userscript、lockfile 和测试结果。
-- 保存安全、提取和打印 fixture。
+- `Readability.parse()` 返回 `null`
+- 正文 HTML 为空
+- 正文只有空白内容
 
-旧版冻结只用于回滚，不要求新版本读取或迁移旧数据。
+章节标题回退顺序：
 
-### Gate 2：删除批准
+1. Readability 标题
+2. 候选链接文字
+3. 抓取页面的 `document.title`
+4. 页面 URL
 
-产品所有者再次明确下达“可以删除并重建”的指令。
+### 7.3 HTML 转换
 
-删除前：
+HTML document adapter 只接受和返回字符串及项目类型，在内部完成 DOM 操作。
 
-- 创建可恢复的 git 分支或 tag。
-- 保留 `.git` 和本说明书。
-- 不删除历史提交或旧版发布附件。
+正文链接全部基于来源页面 URL 转为绝对 URL。
 
-### Gate 3：最小骨架
+图片支持：
 
-- 使用重建日最新稳定依赖。
-- frozen install、lint、typecheck、test 和 build 可执行。
-- userscript 可安装、菜单可见、预览不递归初始化。
+- `img[src]`
+- `img[srcset]`
+- `source[srcset]`
+- `img[data-src]`
+- `img[data-srcset]`
 
-### Gate 4：核心闭环
+当标准属性缺失时使用对应的懒加载属性。`srcset` 中每个 URL 单独绝对化。图片加载失败不使整页失败。
 
-- XPath → 选择 → 抓取 → 提取 → 净化 → 预览 → 打印可用。
-- 运行锁、失败日志和 Cancel 符合本文。
-- 安全样本不能执行。
+每篇文章由预览统一渲染章节标题。如果正文第一个内容元素是同文本 `<h1>`，删除该正文标题。比较时忽略大小写、首尾空白和连续空白；不删除其他标题。
 
-### Gate 5：发布候选版
+### 7.4 HTML 净化
 
-- 全部验收标准通过。
-- 权限审查通过。
-- 四个目标组合冒烟通过。
-- 发布 prerelease 并验证真实文档站。
-- 保留回滚方式。
+复用 DOMPurify。采用默认配置，并额外禁止：
 
-## 19. 审核清单
+```text
+iframe
+object
+embed
+script
+style
+```
 
-- [ ] Userscript 仍是首发形态。
-- [ ] V1 只支持一个用户输入的 XPath，不支持 Auto 或 CSS。
-- [ ] 只发现和抓取 same-origin 链接。
-- [ ] 不实现自定义重定向策略或授权流程。
-- [ ] 固定允许 HTTPS 图片，不提供图片开关。
-- [ ] 不持久化任务、文章、日志、XPath 或设置。
-- [ ] 不读取或迁移任何旧版 storage。
-- [ ] 只允许一个活动任务，只支持 Cancel。
-- [ ] Cancel、失败和刷新后不保留任务状态。
-- [ ] 部分失败显示日志并继续预览成功文章，不提供重试。
-- [ ] 预览只显示失败日志、标题、正文和 Print。
-- [ ] 不提供搜索、筛选、排序、删除单篇或重试单篇。
-- [ ] 不支持自定义打印 CSS，只使用内置样式。
-- [ ] 所有直接依赖在重建日升级至最新稳定版本并锁定。
-- [ ] Readability 和 sanitizer 打包进入 userscript。
-- [ ] 删除代码前仍需再次明确授权。
+删除所有内联 `style` 属性。危险协议、事件属性和可执行内容不得进入预览。
+
+必须尽量保留：
+
+- 标题、段落、列表和引用
+- `pre`、`code`、`kbd`、`samp`
+- 图片、`picture` 和 `source`
+- 表格
+- 普通链接
+- 语义 HTML 结构
+
+不复制来源脚本、样式、字体或交互行为。
+
+## 8. 取消语义
+
+Cancel 只显示在预览窗口。
+
+预览窗口通过 `postMessage` 发送包含随机任务 ID 的取消消息。来源页面必须同时验证：
+
+- `event.source` 是当前预览窗口
+- 消息类型正确
+- `taskId` 与当前任务一致
+
+取消后：
+
+1. 停止调度尚未开始的请求。
+2. 不主动中止已经开始的 GM 请求。
+3. 预览显示 `Cancelling…`。
+4. 等待最多 4 个进行中请求完成、失败或超时。
+5. 按原顺序生成部分结果。
+
+未开始的页面显示取消占位。已经开始的请求按其最终真实结果显示成功或失败。
+
+## 9. 进度与结果
+
+进度状态至少包括：
+
+```text
+Preparing…
+Fetching N / Total…
+Cancelling…
+Building preview…
+Completed
+```
+
+每个页面最终状态为：
+
+- 成功：标题、净化后的正文和来源链接信息
+- 失败：链接名称、URL 和简短原因
+- 取消：未开始页面的取消占位
+
+失败原因不得显示内部堆栈，至少覆盖：
+
+- Timeout
+- Network error
+- HTTP error
+- Unsupported content type
+- Failed to parse document
+- Readability returned no content
+
+预览顶部显示成功、失败和取消数量，并列出失败页面。单页失败不阻止打印。
+
+## 10. 组装、预览与打印
+
+合并文档标题使用来源目录页的 `document.title`，为空时使用 hostname。
+
+每个来源页面渲染为独立 `<article>`：
+
+- 第一篇不强制前置分页。
+- 后续文章使用 `break-before: page`。
+- 失败和取消占位保持原选择位置。
+
+预览只提供：
+
+- Print
+- Close
+
+不自动打开打印对话框。打印稿不在链接文字后显示 URL，但 PDF 中链接应保持可点击。
+
+固定打印 CSS 至少覆盖：
+
+- 正文字体、宽度和标题层级
+- 代码块换行或溢出
+- 表格边框、换行和分页
+- 图片最大宽度
+- 引用和链接
+- 章节分页
+- 失败占位
+- 打印时隐藏工具栏和控制项
+
+## 11. Toast
+
+来源页面使用轻量、纯文本、非阻塞 toast 显示：
+
+- 没有候选页面
+- 预览窗口被拦截
+- 预览窗口已关闭
+- 任务已取消
+- 未预期错误
+
+Toast 应自动消失并具备合理的可访问性语义。不为此建立通用通知框架。
+
+## 12. 架构
+
+### 12.1 结构
+
+```text
+src/
+├── entity.ts
+├── port.ts
+├── usecase/
+│   ├── discover.ts
+│   ├── select.ts
+│   ├── collect.ts
+│   └── assemble.ts
+├── adapter/
+│   ├── page-dom.ts
+│   ├── html-document.ts
+│   ├── readability.ts
+│   ├── dompurify.ts
+│   ├── gm-fetch.ts
+│   ├── selection-dialog.ts
+│   ├── preview-window.ts
+│   ├── toast.ts
+│   └── tampermonkey-menu.ts
+└── main.ts
+```
+
+不为结构图创建空文件、barrel exports、类层级、DI 容器、repository、service、gateway 或独立 workflow 层。
+
+### 12.2 依赖方向
+
+```text
+main.ts → usecase + adapter
+usecase → entity.ts + port.ts
+adapter → entity.ts + port.ts
+```
+
+禁止：
+
+```text
+usecase → adapter
+usecase → DOM / Window / GM globals
+usecase → Readability / DOMPurify
+usecase → 第三方库原生类型
+```
+
+用例可以使用标准 `URL`，但不能使用 `Document`、`Element`、`Window`、`MessageEvent`、GM、Readability 或 DOMPurify 类型。
+
+### 12.3 `entity.ts`
+
+只定义项目自有业务类型和错误类型，例如：
+
+- PageSnapshot
+- CandidateLink
+- SelectedPage
+- FetchResponse
+- FetchFailure
+- ExtractedArticle
+- CollectedPage
+- CollectionProgress
+- PrintDocument
+
+不得包含外部能力接口或第三方原生类型。
+
+### 12.4 `port.ts`
+
+集中定义所有外部能力接口，只放接口，不放实体、错误或实现。接口保持小型并按业务角色拆分，至少包括：
+
+- PageReader
+- PageFetcher
+- ArticleExtractor
+- HtmlTransformer
+- HtmlSanitizer
+- LinkSelector
+- Preview
+- Notifier
+- MenuRegistrar
+
+### 12.5 四个用例
+
+`discover.ts`：
+
+- URL 解析、过滤、追踪参数删除、去重、命名和顺序
+- 不访问真实 DOM 或网络
+
+`select.ts`：
+
+- 默认未选择、单项切换、全选、全不选、开始条件和稳定顺序
+- 不访问 dialog 或事件对象
+
+`collect.ts`：
+
+- 编排 fetch、状态和类型验证、Readability、HTML 转换、DOMPurify
+- 固定并发、进度、失败隔离和取消语义
+- 不直接依赖任何 adapter
+
+`assemble.ts`：
+
+- 把收集结果按原顺序转换为打印文档模型
+- 生成失败汇总和分页信息
+- 不渲染真实窗口或 HTML 文档壳
+
+### 12.6 adapters
+
+- `page-dom.ts`：读取当前页面 DOM，返回项目快照
+- `html-document.ts`：DOMParser、资源转换和重复标题处理
+- `readability.ts`：包装 Readability，返回项目类型
+- `dompurify.ts`：包装 DOMPurify 和固定净化配置
+- `gm-fetch.ts`：包装 `GM_xmlhttpRequest`
+- `selection-dialog.ts`：选择对话框 DOM 与交互
+- `preview-window.ts`：窗口、进度、取消、打印和关闭
+- `toast.ts`：来源页面通知
+- `tampermonkey-menu.ts`：菜单注册
+
+所有 adapters 只通过项目自有简单类型和 `port.ts` 与用例交换数据。
+
+### 12.7 `main.ts`
+
+`main.ts` 是唯一 composition root，负责创建 adapters、注册菜单并串联四个用例。
+
+它不得实现 URL 规则、并发池、HTTP/Content-Type 规则、Readability、净化、资源重写或失败汇总。
+
+## 13. 测试策略
+
+测试按用例和 adapter 分开。每个新模块先写规格测试，再实现。
+
+```text
+test/
+├── usecase/
+│   ├── discover.test.ts
+│   ├── select.test.ts
+│   ├── collect.test.ts
+│   └── assemble.test.ts
+└── adapter/
+    └── 按高价值外部映射创建测试
+```
+
+不请求真实网站，也不保存 Solid 或 Effect 的完整 fixture。内容测试使用最小内联 HTML。
+
+### 13.1 用例测试
+
+使用手写 fake ports，覆盖：
+
+- 同源、fragment、追踪参数、query、尾斜杠和资源过滤
+- 名称回退、DOM 顺序和去重
+- 默认不选、全选、全不选和稳定选择顺序
+- 最大并发 4
+- 乱序完成时保持输入顺序
+- 单项失败不阻塞批次
+- 取消后停止调度并等待在途任务
+- 未开始项标记取消
+- HTTP 状态和 Content-Type 业务规则
+- 成功、失败和取消汇总
+- 分页标记和文档标题回退
+
+### 13.2 Adapter 测试
+
+用最小内联 HTML 或替代外部 API，覆盖：
+
+- 页面 DOM 到项目快照的映射
+- Readability 正常和空内容结果
+- `pre`、`code`、表格和图片保留
+- 相对链接、`src`、`srcset`、`data-src` 和 `data-srcset`
+- 重复首个 `<h1>`
+- 危险元素、事件属性、协议和内联样式清理
+- GM 成功、网络错误和超时映射
+- dialog 的默认状态和批量选择
+- popup blocked
+- Cancel 消息的 source 与 task ID 校验
+
+不追求脆弱的完整 DOM 快照。不新增依赖只为自动检查导入方向。
+
+## 14. 人工验收
+
+首批站点：
+
+- `https://v2.solidjs.com/`
+- `https://www.effect.website/docs/v4/onboarding`
+
+在最新版 Firefox + Tampermonkey 上至少验证：
+
+1. 两个站点均能发现同源候选链接。
+2. 默认无选中项，并支持逐项、全选和全不选。
+3. 可处理至少 30 个页面，并发不超过 4。
+4. 输出顺序与候选 DOM 顺序一致。
+5. 标题、正文、代码块、图片和表格适合打印。
+6. 相对链接和图片资源正确绝对化。
+7. 单页失败不会终止任务，失败占位和汇总准确。
+8. Cancel 停止调度新请求并保留在途请求的最终结果。
+9. 关闭预览窗口等同取消。
+10. 每篇文章独立分页。
+11. Print 打开浏览器打印对话框，工具栏不进入打印稿。
+12. popup blocked 时不开始抓取并给出提示。
+
+Firefox 验收通过后，再分别验证 Chrome 和 Safari；通过前不得声明已正式支持。
+
+## 15. 工程范围
+
+实施获批后：
+
+- 删除现有 `src/` 中的旧业务实现。
+- 删除或替换描述旧流程的测试。
+- 删除或重写描述旧架构和旧 UI 的文档。
+- 删除旧选择器输入、自定义 CSS、存储和迁移能力。
+- 删除不再使用的模块和依赖。
+
+保留：
+
+- Git 历史
+- Vite、TypeScript、Vitest、Biome 和 vite-plugin-monkey 配置
+- lockfile 和开发环境配置
+- `@mozilla/readability`
+- `dompurify`
+- Tampermonkey 类型
+- 仍然准确的开发指令
+
+## 16. 实施顺序
+
+必须获得明确的“开始重写”授权后执行：
+
+1. 删除旧业务测试和实现。
+2. 建立 `entity.ts` 与 `port.ts`。
+3. 依次为 discover、select、collect、assemble 写测试并实现。
+4. 为外部 adapters 写高价值测试并实现。
+5. 在 `main.ts` 完成 composition。
+6. 删除剩余旧业务代码。
+7. 运行 lint、typecheck、test 和 build。
+8. 在 Firefox + Tampermonkey 上验收两个真实站点。
+9. 验收通过后更新实现相关文档。
+10. 后续验证 Chrome 和 Safari。
+
+## 17. 完成定义
+
+MVP 完成必须满足：
+
+- Firefox + Tampermonkey 人工验收通过。
+- Solid 2 和 Effect v4 均完成真实流程验证。
+- 至少稳定处理 30 页。
+- 固定并发 4、单页超时 20 秒、无重试。
+- 非 `2xx` 和明确非 HTML 响应失败。
+- 单页失败不终止任务，最终顺序稳定。
+- 取消和关闭窗口语义符合本文。
+- Readability、资源转换和 DOMPurify 流水线符合本文。
+- 危险内容、属性和协议不进入预览。
+- 每篇文章独立分页，并提供 Print 和 Close。
+- 内层 usecase 不直接依赖 DOM、Window、GM 或第三方库。
+- 自动化测试不依赖真实网络或真实站点 fixture。
+- `pnpm run lint`、`pnpm run typecheck`、`pnpm run test`、`pnpm run build` 全部通过。
+- 旧流程文档已删除或更新。
+- Chrome 和 Safari 在通过验证前明确标记为未验证兼容目标。
+
+## 18. 当前授权状态
+
+本文已获批准写入仓库，但尚未获得源码重写授权。
+
+在产品所有者明确回复“开始重写”前，不得：
+
+- 删除或修改现有源码
+- 删除或修改现有测试
+- 修改依赖
+- 开始实现新业务流程
