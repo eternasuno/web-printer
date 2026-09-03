@@ -1,6 +1,6 @@
-import type { MenuRegistrar } from '../port';
+import type { IMenuRegistrar } from '../port';
 
-export const createMenuRegistrar = (): MenuRegistrar => ({
+export const createMenuRegistrar = (): IMenuRegistrar => ({
   register: (label, handler) => {
     GM_registerMenuCommand(label, handler);
   },

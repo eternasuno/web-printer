@@ -1,6 +1,6 @@
-import type { PageReader } from '../port';
+import type { IPageReader } from '../port';
 
-export const createPageReader = (page: Document = document): PageReader => ({
+export const createPageReader = (page: Document = document): IPageReader => ({
   readPage: () => ({
     url: page.URL,
     title: page.querySelector('title')?.textContent ?? page.title,

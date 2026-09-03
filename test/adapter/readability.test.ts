@@ -1,5 +1,11 @@
+import { Effect } from 'effect';
 import { describe, expect, it } from 'vitest';
-import { createArticleExtractor } from '../../src/adapter/readability';
+import { ArticleExtractorLive } from '../../src/adapter/readability';
+import { ArticleExtractor } from '../../src/port';
+
+const extractor = Effect.runSync(
+  Effect.provide(ArticleExtractor, ArticleExtractorLive)
+);
 
 const articleHtml = `
   <!doctype html>
@@ -23,7 +29,7 @@ const articleHtml = `
 
 describe('Readability adapter', () => {
   it('returns project-owned title and content HTML', () => {
-    const result = createArticleExtractor().extract(
+    const result = extractor.extract(
       articleHtml,
       'https://docs.example.test/guide'
     );
@@ -36,7 +42,7 @@ describe('Readability adapter', () => {
   });
 
   it('returns null when Readability finds no article', () => {
-    const result = createArticleExtractor().extract(
+    const result = extractor.extract(
       '<html><body></body></html>',
       'https://docs.example.test/empty'
     );
@@ -45,7 +51,7 @@ describe('Readability adapter', () => {
   });
 
   it('uses the source URL as the document parsing context', () => {
-    const result = createArticleExtractor().extract(
+    const result = extractor.extract(
       articleHtml,
       'https://docs.example.test/guide/page'
     );

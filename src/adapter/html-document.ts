@@ -1,4 +1,5 @@
-import type { HtmlTransformer } from '../port';
+import { Layer } from 'effect';
+import { HtmlTransformer } from '../port';
 
 const absolute = (value: string, base: string): string | null => {
   try {
@@ -57,7 +58,7 @@ const sameHeading = (left: string, right: string): boolean =>
   left.replace(/\s+/g, ' ').trim().toLowerCase() ===
   right.replace(/\s+/g, ' ').trim().toLowerCase();
 
-export const createHtmlTransformer = (): HtmlTransformer => ({
+export const HtmlTransformerLive = Layer.succeed(HtmlTransformer, {
   transform: (html, sourceUrl, title) => {
     const page = new DOMParser().parseFromString(html, 'text/html');
     promoteLazyImages(page);

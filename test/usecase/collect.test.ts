@@ -1,9 +1,27 @@
+import { Effect, Layer } from 'effect';
 import { describe, expect, it } from 'vitest';
 import {
-  type CollectDependencies,
+  ArticleExtractor,
+  HtmlSanitizer,
+  HtmlTransformer,
+  type IArticleExtractor,
+  type IHtmlSanitizer,
+  type IHtmlTransformer,
+  type IPageFetcher,
+  PageFetcher,
+} from '../../src/port';
+import {
+  type CollectServices,
   collect,
   collectPage,
 } from '../../src/usecase/collect';
+
+type Stub = {
+  readonly fetcher: IPageFetcher;
+  readonly extractor: IArticleExtractor;
+  readonly transformer: IHtmlTransformer;
+  readonly sanitizer: IHtmlSanitizer;
+};
 
 const page = (order: number) => ({
   url: `https://docs.test/${order}`,
@@ -24,7 +42,7 @@ const response = (
 
 const dependencies = (
   fetchResponse: Tampermonkey.Response<undefined> = response()
-): CollectDependencies => ({
+): Stub => ({
   fetcher: { fetch: async () => fetchResponse },
   extractor: {
     extract: () => ({
@@ -39,10 +57,23 @@ const dependencies = (
   sanitizer: { sanitize: (html: string) => html },
 });
 
+const layer = (ports: Stub) =>
+  Layer.mergeAll(
+    Layer.succeed(PageFetcher, ports.fetcher),
+    Layer.succeed(ArticleExtractor, ports.extractor),
+    Layer.succeed(HtmlTransformer, ports.transformer),
+    Layer.succeed(HtmlSanitizer, ports.sanitizer)
+  );
+
+const run = <A>(
+  effect: Effect.Effect<A, never, CollectServices>,
+  ports: Stub
+): Promise<A> => Effect.runPromise(Effect.provide(effect, layer(ports)));
+
 describe('collectPage', () => {
   it('fetches, extracts, transforms, and sanitizes one page in order', async () => {
     const calls: string[] = [];
-    const result = await collectPage(page(0), {
+    const result = await run(collectPage(page(0)), {
       fetcher: {
         fetch: async (_url: string, timeout: number) => {
           calls.push(`fetch:${timeout}`);
@@ -101,7 +132,7 @@ describe('collectPage', () => {
       })
     );
 
-    await expect(collectPage(page(0), deps)).resolves.toMatchObject({
+    await expect(run(collectPage(page(0)), deps)).resolves.toMatchObject({
       type: 'failure',
       reason: `HTTP ${status}`,
     });
@@ -110,8 +141,8 @@ describe('collectPage', () => {
   it.each(['text/html', 'application/xhtml+xml', null])(
     'accepts content type %s',
     async (contentType) => {
-      const result = await collectPage(
-        page(0),
+      const result = await run(
+        collectPage(page(0)),
         dependencies(
           response({
             responseHeaders: contentType ? `Content-Type: ${contentType}` : '',
@@ -126,8 +157,8 @@ describe('collectPage', () => {
   );
 
   it('rejects an explicit non-HTML content type before extraction', async () => {
-    const result = await collectPage(
-      page(0),
+    const result = await run(
+      collectPage(page(0)),
       dependencies(
         response({
           responseHeaders: 'Content-Type: application/pdf',
@@ -151,14 +182,17 @@ describe('collectPage', () => {
       contentHtml: '<p>X</p>',
     });
 
-    const labelled = await collectPage(page(0), deps);
-    const documentTitle = await collectPage({ ...page(1), label: '' }, deps);
+    const labelled = await run(collectPage(page(0)), deps);
+    const documentTitle = await run(
+      collectPage({ ...page(1), label: '' }),
+      deps
+    );
     deps.extractor.extract = () => ({
       title: null,
       documentTitle: ' ',
       contentHtml: '<p>X</p>',
     });
-    const url = await collectPage({ ...page(2), label: '' }, deps);
+    const url = await run(collectPage({ ...page(2), label: '' }), deps);
 
     expect(labelled).toMatchObject({ article: { title: 'Page 0' } });
     expect(documentTitle).toMatchObject({
@@ -173,11 +207,11 @@ describe('collectPage', () => {
     const empty = dependencies();
     empty.sanitizer.sanitize = () => '   ';
 
-    await expect(collectPage(page(0), noArticle)).resolves.toMatchObject({
+    await expect(run(collectPage(page(0)), noArticle)).resolves.toMatchObject({
       type: 'failure',
       reason: 'Readability returned no content',
     });
-    await expect(collectPage(page(0), empty)).resolves.toMatchObject({
+    await expect(run(collectPage(page(0)), empty)).resolves.toMatchObject({
       type: 'failure',
       reason: 'Sanitized content is empty',
     });
@@ -198,8 +232,8 @@ describe('collect', () => {
       return response({ finalUrl: url });
     };
 
-    const result = await collect(
-      Array.from({ length: 8 }, (_, i) => page(i)),
+    const result = await run(
+      collect(Array.from({ length: 8 }, (_, i) => page(i))),
       deps
     );
 
@@ -220,9 +254,12 @@ describe('collect', () => {
       return response({ finalUrl: url });
     };
 
-    const result = await collect([page(0), page(1), page(2)], deps, {
-      onProgress: (progress) => completed.push(progress.completed),
-    });
+    const result = await run(
+      collect([page(0), page(1), page(2)], {
+        onProgress: (progress) => completed.push(progress.completed),
+      }),
+      deps
+    );
 
     expect(result.map((item) => item.type)).toEqual([
       'success',
@@ -239,22 +276,31 @@ describe('collect', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
+    let startedFour: (() => void) | undefined;
+    const fourActive = new Promise<void>((resolve) => {
+      startedFour = resolve;
+    });
     const deps = dependencies();
     deps.fetcher.fetch = async (url: string) => {
       started += 1;
+      if (started === 4) {
+        startedFour?.();
+      }
       await gate;
 
       return response({ finalUrl: url });
     };
 
-    const pending = collect(
-      Array.from({ length: 6 }, (_, i) => page(i)),
-      deps,
-      {
-        isCancelled: () => cancelled,
-      }
+    const pending = run(
+      collect(
+        Array.from({ length: 6 }, (_, i) => page(i)),
+        {
+          isCancelled: () => cancelled,
+        }
+      ),
+      deps
     );
-    await Promise.resolve();
+    await fourActive;
     cancelled = true;
     release?.();
     const result = await pending;

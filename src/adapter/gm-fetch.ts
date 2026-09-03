@@ -1,6 +1,7 @@
-import type { PageFetcher } from '../port';
+import { Layer } from 'effect';
+import { PageFetcher } from '../port';
 
-export const createPageFetcher = (): PageFetcher => ({
+export const PageFetcherLive = Layer.succeed(PageFetcher, {
   fetch: (url, timeout) =>
     new Promise((resolve, reject) => {
       GM_xmlhttpRequest({

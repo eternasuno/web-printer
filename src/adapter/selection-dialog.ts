@@ -1,5 +1,5 @@
 import type { CandidateLink, SelectedPage, SelectionState } from '../entity';
-import type { LinkSelector } from '../port';
+import type { ILinkSelector } from '../port';
 import {
   createSelection,
   invertSelection,
@@ -135,7 +135,7 @@ const onBackdrop = (dialog: HTMLDialogElement, x: number, y: number) => {
 const select = (
   page: Document,
   candidates: readonly CandidateLink[]
-): ReturnType<LinkSelector['select']> =>
+): ReturnType<ILinkSelector['select']> =>
   new Promise((resolve) => {
     const style = page.createElement('style');
     style.textContent = sheet;
@@ -186,6 +186,6 @@ const select = (
 
 export const createLinkSelector = (
   page: Document = document
-): LinkSelector => ({
+): ILinkSelector => ({
   select: (candidates) => select(page, candidates),
 });

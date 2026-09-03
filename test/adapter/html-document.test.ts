@@ -1,12 +1,14 @@
+import { Effect } from 'effect';
 import { describe, expect, it } from 'vitest';
-import { createHtmlTransformer } from '../../src/adapter/html-document';
+import { HtmlTransformerLive } from '../../src/adapter/html-document';
+import { HtmlTransformer } from '../../src/port';
+
+const transformer = Effect.runSync(
+  Effect.provide(HtmlTransformer, HtmlTransformerLive)
+);
 
 const transform = (html: string, title = 'Guide') =>
-  createHtmlTransformer().transform(
-    html,
-    'https://docs.example.test/guide/page',
-    title
-  );
+  transformer.transform(html, 'https://docs.example.test/guide/page', title);
 
 const body = (html: string) => {
   const page = document.implementation.createHTMLDocument();

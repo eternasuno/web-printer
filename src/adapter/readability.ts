@@ -1,7 +1,8 @@
 import { Readability } from '@mozilla/readability';
-import type { ArticleExtractor } from '../port';
+import { Layer } from 'effect';
+import { ArticleExtractor } from '../port';
 
-export const createArticleExtractor = (): ArticleExtractor => ({
+export const ArticleExtractorLive = Layer.succeed(ArticleExtractor, {
   extract: (html, url) => {
     const page = new DOMParser().parseFromString(html, 'text/html');
     const base = page.createElement('base');

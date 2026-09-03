@@ -1,9 +1,10 @@
-import { createHtmlSanitizer } from './adapter/dompurify';
-import { createPageFetcher } from './adapter/gm-fetch';
-import { createHtmlTransformer } from './adapter/html-document';
+import { Effect, Layer } from 'effect';
+import { HtmlSanitizerLive } from './adapter/dompurify';
+import { PageFetcherLive } from './adapter/gm-fetch';
+import { HtmlTransformerLive } from './adapter/html-document';
 import { createPageReader } from './adapter/page-dom';
 import { openPreview } from './adapter/preview-window';
-import { createArticleExtractor } from './adapter/readability';
+import { ArticleExtractorLive } from './adapter/readability';
 import { createLinkSelector } from './adapter/selection-dialog';
 import { createMenuRegistrar } from './adapter/tampermonkey-menu';
 import { createNotifier } from './adapter/toast';
@@ -11,12 +12,12 @@ import { assemble } from './usecase/assemble';
 import { collect } from './usecase/collect';
 import { discover } from './usecase/discover';
 
-const collectionAdapters = () => ({
-  fetcher: createPageFetcher(),
-  extractor: createArticleExtractor(),
-  transformer: createHtmlTransformer(),
-  sanitizer: createHtmlSanitizer(),
-});
+const CollectionLive = Layer.mergeAll(
+  PageFetcherLive,
+  ArticleExtractorLive,
+  HtmlTransformerLive,
+  HtmlSanitizerLive
+);
 
 const run = async (): Promise<void> => {
   const notifier = createNotifier();
@@ -45,10 +46,15 @@ const run = async (): Promise<void> => {
     return;
   }
 
-  const results = await collect(selected, collectionAdapters(), {
-    isCancelled: () => preview.isCancelled() || preview.isClosed(),
-    onProgress: (progress) => preview.update(progress),
-  });
+  const results = await Effect.runPromise(
+    Effect.provide(
+      collect(selected, {
+        isCancelled: () => preview.isCancelled() || preview.isClosed(),
+        onProgress: (progress) => preview.update(progress),
+      }),
+      CollectionLive
+    )
+  );
   if (preview.isClosed()) {
     notifier.show('Web Printer task cancelled');
     return;

@@ -1,7 +1,8 @@
 import DOMPurify from 'dompurify';
-import type { HtmlSanitizer } from '../port';
+import { Layer } from 'effect';
+import { HtmlSanitizer } from '../port';
 
-export const createHtmlSanitizer = (): HtmlSanitizer => ({
+export const HtmlSanitizerLive = Layer.succeed(HtmlSanitizer, {
   sanitize: (html) =>
     DOMPurify.sanitize(html, {
       FORBID_TAGS: ['iframe', 'object', 'embed', 'script', 'style'],

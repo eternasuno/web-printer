@@ -1,5 +1,5 @@
 import type { PrintDocument, PrintItem } from '../entity';
-import type { Preview } from '../port';
+import type { IPreview } from '../port';
 
 type Popup = Pick<
   Window,
@@ -89,7 +89,7 @@ export const openPreview = (
   open: OpenWindow = () => window.open('', '_blank'),
   taskId: string,
   title: string
-): Preview | null => {
+): IPreview | null => {
   const popup = open();
   if (!popup) {
     return null;

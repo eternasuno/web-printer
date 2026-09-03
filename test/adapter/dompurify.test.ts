@@ -1,7 +1,13 @@
+import { Effect } from 'effect';
 import { describe, expect, it } from 'vitest';
-import { createHtmlSanitizer } from '../../src/adapter/dompurify';
+import { HtmlSanitizerLive } from '../../src/adapter/dompurify';
+import { HtmlSanitizer } from '../../src/port';
 
-const sanitize = (html: string) => createHtmlSanitizer().sanitize(html);
+const sanitizer = Effect.runSync(
+  Effect.provide(HtmlSanitizer, HtmlSanitizerLive)
+);
+
+const sanitize = (html: string) => sanitizer.sanitize(html);
 
 const body = (html: string) => {
   const page = document.implementation.createHTMLDocument();
