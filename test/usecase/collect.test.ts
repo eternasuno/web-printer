@@ -1,12 +1,14 @@
+import type { Readability } from '@mozilla/readability';
 import { Effect, Layer } from 'effect';
 import { describe, expect, it } from 'vitest';
+import type { CollectedPage, SelectedPage } from '../../src/entity';
 import {
   ArticleExtractor,
+  HtmlDocumentParser,
   HtmlSanitizer,
-  HtmlTransformer,
   type IArticleExtractor,
+  type IHtmlDocumentParser,
   type IHtmlSanitizer,
-  type IHtmlTransformer,
   type IPageFetcher,
   PageFetcher,
 } from '../../src/port';
@@ -16,11 +18,13 @@ import {
   collectPage,
 } from '../../src/usecase/collect';
 
+type FetchResponse = Tampermonkey.Response<undefined>;
+
 type Stub = {
-  readonly fetcher: IPageFetcher;
-  readonly extractor: IArticleExtractor;
-  readonly transformer: IHtmlTransformer;
-  readonly sanitizer: IHtmlSanitizer;
+  fetcher: IPageFetcher;
+  parser: IHtmlDocumentParser;
+  extractor: IArticleExtractor;
+  sanitizer: IHtmlSanitizer;
 };
 
 const page = (order: number) => ({
@@ -29,39 +33,41 @@ const page = (order: number) => ({
   order,
 });
 
-const response = (
-  values: Partial<Tampermonkey.Response<undefined>> = {}
-): Tampermonkey.Response<undefined> =>
+const response = (values: Partial<FetchResponse> = {}): FetchResponse =>
   ({
     status: 200,
     responseHeaders: 'Content-Type: text/html',
     responseText: '<main><p>Body</p></main>',
     finalUrl: 'https://docs.test/final',
     ...values,
-  }) as Tampermonkey.Response<undefined>;
+  }) as FetchResponse;
 
-const dependencies = (
-  fetchResponse: Tampermonkey.Response<undefined> = response()
-): Stub => ({
-  fetcher: { fetch: async () => fetchResponse },
-  extractor: {
-    extract: () => ({
-      title: 'Article',
-      documentTitle: 'Document',
-      contentHtml: '<p>Body</p>',
-    }),
-  },
-  transformer: {
-    transform: (html: string) => `<article>${html}</article>`,
-  },
+const article = (
+  title: string | null = 'Article',
+  content = '<p>Body</p>'
+): NonNullable<ReturnType<Readability['parse']>> =>
+  ({ title, content }) as NonNullable<ReturnType<Readability['parse']>>;
+
+const parseDocument = (html: string, url: string): Document => {
+  const page = new DOMParser().parseFromString(html, 'text/html');
+  Object.defineProperty(page, 'URL', { value: url });
+  page.title = 'Document';
+
+  return page;
+};
+
+const dependencies = (fetchResponse: FetchResponse = response()): Stub => ({
+  fetcher: { fetch: () => Effect.succeed(fetchResponse) },
+  parser: { parse: parseDocument },
+  extractor: { extract: () => article() },
   sanitizer: { sanitize: (html: string) => html },
 });
 
-const layer = (ports: Stub) =>
+const layer = (ports: Stub): Layer.Layer<CollectServices> =>
   Layer.mergeAll(
     Layer.succeed(PageFetcher, ports.fetcher),
+    Layer.succeed(HtmlDocumentParser, ports.parser),
     Layer.succeed(ArticleExtractor, ports.extractor),
-    Layer.succeed(HtmlTransformer, ports.transformer),
     Layer.succeed(HtmlSanitizer, ports.sanitizer)
   );
 
@@ -70,36 +76,38 @@ const run = <A>(
   ports: Stub
 ): Promise<A> => Effect.runPromise(Effect.provide(effect, layer(ports)));
 
-describe('collectPage', () => {
-  it('fetches, extracts, transforms, and sanitizes one page in order', async () => {
-    const calls: string[] = [];
-    const result = await run(collectPage(page(0)), {
-      fetcher: {
-        fetch: async (_url: string, timeout: number) => {
-          calls.push(`fetch:${timeout}`);
+const collectedPage = (
+  page: SelectedPage,
+  stubs: Stub
+): Promise<CollectedPage> => run(collectPage(page), stubs);
 
-          return response({
-            responseHeaders: 'Content-Type: text/html; charset=utf-8',
-            responseText: '<p>Raw</p>',
-          });
+describe('collectPage', () => {
+  it('fetches, parses, extracts, and sanitizes one page in order', async () => {
+    const calls: string[] = [];
+    const result = await collectedPage(page(0), {
+      fetcher: {
+        fetch: (_url: string, timeout: number) =>
+          Effect.sync(() => {
+            calls.push(`fetch:${timeout}`);
+
+            return response({
+              responseHeaders: 'Content-Type: text/html; charset=utf-8',
+              responseText: '<p>Raw</p>',
+            });
+          }),
+      },
+      parser: {
+        parse: (html: string, url: string) => {
+          calls.push(`parse:${url}`);
+
+          return parseDocument(html, url);
         },
       },
       extractor: {
-        extract: () => {
-          calls.push('extract');
+        extract: (page: Document) => {
+          calls.push(`extract:${page.URL}`);
 
-          return {
-            title: 'Title',
-            documentTitle: 'Document',
-            contentHtml: '<p>Extracted</p>',
-          };
-        },
-      },
-      transformer: {
-        transform: (html: string, sourceUrl: string, title: string) => {
-          calls.push(`transform:${sourceUrl}:${title}`);
-
-          return html;
+          return article('Title', '<p>Extracted</p>');
         },
       },
       sanitizer: {
@@ -112,9 +120,9 @@ describe('collectPage', () => {
     });
 
     expect(calls).toEqual([
-      'fetch:20000',
-      'extract',
-      'transform:https://docs.test/final:Title',
+      'fetch:10000',
+      'parse:https://docs.test/final',
+      'extract:https://docs.test/final',
       'sanitize',
     ]);
     expect(result).toMatchObject({
@@ -124,15 +132,9 @@ describe('collectPage', () => {
   });
 
   it.each([199, 300, 404, 500])('rejects HTTP status %s', async (status) => {
-    const deps = dependencies(
-      response({
-        status,
-        responseText: '<p>Error</p>',
-        finalUrl: 'https://docs.test/error',
-      })
-    );
+    const deps = dependencies(response({ status }));
 
-    await expect(run(collectPage(page(0)), deps)).resolves.toMatchObject({
+    await expect(collectedPage(page(0), deps)).resolves.toMatchObject({
       type: 'failure',
       reason: `HTTP ${status}`,
     });
@@ -141,29 +143,26 @@ describe('collectPage', () => {
   it.each(['text/html', 'application/xhtml+xml', null])(
     'accepts content type %s',
     async (contentType) => {
-      const result = await run(
-        collectPage(page(0)),
+      const result = await collectedPage(
+        page(0),
         dependencies(
           response({
             responseHeaders: contentType ? `Content-Type: ${contentType}` : '',
-            responseText: '<p>Body</p>',
-            finalUrl: 'https://docs.test/page',
           })
         )
       );
 
-      expect(result.type).toBe('success');
+      expect(result).toMatchObject({ type: 'success' });
     }
   );
 
   it('rejects an explicit non-HTML content type before extraction', async () => {
-    const result = await run(
-      collectPage(page(0)),
+    const result = await collectedPage(
+      page(0),
       dependencies(
         response({
           responseHeaders: 'Content-Type: application/pdf',
           responseText: '%PDF',
-          finalUrl: 'https://docs.test/file.pdf',
         })
       )
     );
@@ -176,23 +175,21 @@ describe('collectPage', () => {
 
   it('uses label, document title, and URL when extracted titles are missing', async () => {
     const deps = dependencies();
-    deps.extractor.extract = () => ({
-      title: ' ',
-      documentTitle: 'Document title',
-      contentHtml: '<p>X</p>',
-    });
+    const parse = (title: string) => {
+      deps.parser.parse = (html: string, url: string) => {
+        const result = parseDocument(html, url);
+        result.title = title;
 
-    const labelled = await run(collectPage(page(0)), deps);
-    const documentTitle = await run(
-      collectPage({ ...page(1), label: '' }),
-      deps
-    );
-    deps.extractor.extract = () => ({
-      title: null,
-      documentTitle: ' ',
-      contentHtml: '<p>X</p>',
-    });
-    const url = await run(collectPage({ ...page(2), label: '' }), deps);
+        return result;
+      };
+    };
+    deps.extractor.extract = () => article(' ', '<p>X</p>');
+    const labelled = await collectedPage(page(0), deps);
+    parse('Document title');
+    const documentTitle = await collectedPage({ ...page(1), label: '' }, deps);
+    parse(' ');
+    deps.extractor.extract = () => article(null, '<p>X</p>');
+    const url = await collectedPage({ ...page(2), label: '' }, deps);
 
     expect(labelled).toMatchObject({ article: { title: 'Page 0' } });
     expect(documentTitle).toMatchObject({
@@ -202,18 +199,51 @@ describe('collectPage', () => {
   });
 
   it('fails when Readability or sanitized content is empty', async () => {
-    const noArticle = dependencies();
+    const [noArticle, empty] = [dependencies(), dependencies()];
     noArticle.extractor.extract = () => null;
-    const empty = dependencies();
     empty.sanitizer.sanitize = () => '   ';
 
-    await expect(run(collectPage(page(0)), noArticle)).resolves.toMatchObject({
+    await expect(collectedPage(page(0), noArticle)).resolves.toMatchObject({
       type: 'failure',
       reason: 'Readability returned no content',
     });
-    await expect(run(collectPage(page(0)), empty)).resolves.toMatchObject({
+    await expect(collectedPage(page(0), empty)).resolves.toMatchObject({
       type: 'failure',
       reason: 'Sanitized content is empty',
+    });
+  });
+
+  it.each([
+    ['offline', new Error('offline')],
+    ['Network error', { readyState: 0 }],
+  ])('maps a fetch failure to %s', async (reason, error) => {
+    const deps = dependencies();
+    deps.fetcher.fetch = () => Effect.fail(error);
+
+    await expect(collectedPage(page(0), deps)).resolves.toMatchObject({
+      type: 'failure',
+      reason,
+    });
+  });
+
+  it('maps synchronous exceptions from the adapters to a page failure', async () => {
+    const deps = dependencies();
+    deps.fetcher.fetch = () => {
+      throw new Error('fetch unavailable');
+    };
+
+    await expect(collectedPage(page(0), deps)).resolves.toMatchObject({
+      type: 'failure',
+      reason: 'fetch unavailable',
+    });
+    deps.fetcher.fetch = () => Effect.succeed(response());
+    deps.parser.parse = () => {
+      throw new SyntaxError('bad markup');
+    };
+
+    await expect(collectedPage(page(0), deps)).resolves.toMatchObject({
+      type: 'failure',
+      reason: 'bad markup',
     });
   });
 });
@@ -223,14 +253,15 @@ describe('collect', () => {
     let active = 0;
     let maximum = 0;
     const deps = dependencies();
-    deps.fetcher.fetch = async (url: string) => {
-      active += 1;
-      maximum = Math.max(maximum, active);
-      await new Promise((resolve) => setTimeout(resolve, 2));
-      active -= 1;
+    deps.fetcher.fetch = (url: string) =>
+      Effect.promise(async () => {
+        active += 1;
+        maximum = Math.max(maximum, active);
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        active -= 1;
 
-      return response({ finalUrl: url });
-    };
+        return response({ finalUrl: url });
+      });
 
     const result = await run(
       collect(Array.from({ length: 8 }, (_, i) => page(i))),
@@ -246,13 +277,10 @@ describe('collect', () => {
   it('continues after a page failure and reports progress for each result', async () => {
     const completed: number[] = [];
     const deps = dependencies();
-    deps.fetcher.fetch = async (url: string) => {
-      if (url.endsWith('/1')) {
-        throw new Error('offline');
-      }
-
-      return response({ finalUrl: url });
-    };
+    deps.fetcher.fetch = (url: string) =>
+      url.endsWith('/1')
+        ? Effect.fail(new Error('offline'))
+        : Effect.succeed(response({ finalUrl: url }));
 
     const result = await run(
       collect([page(0), page(1), page(2)], {
@@ -269,49 +297,47 @@ describe('collect', () => {
     expect(completed).toEqual([1, 2, 3]);
   });
 
-  it('stops scheduling after cancellation and waits for active work', async () => {
-    let cancelled = false;
+  it('stops scheduling and drops late results when interrupted', async () => {
+    const controller = new AbortController();
+    const completed: number[] = [];
+    const aborted: string[] = [];
     let started = 0;
     let release: (() => void) | undefined;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    let startedFour: (() => void) | undefined;
-    const fourActive = new Promise<void>((resolve) => {
-      startedFour = resolve;
-    });
     const deps = dependencies();
-    deps.fetcher.fetch = async (url: string) => {
-      started += 1;
-      if (started === 4) {
-        startedFour?.();
-      }
-      await gate;
+    deps.fetcher.fetch = (url: string) =>
+      Effect.callback<Tampermonkey.Response<undefined>, unknown>((resume) => {
+        started += 1;
+        void gate.then(() =>
+          resume(Effect.succeed(response({ finalUrl: url })))
+        );
 
-      return response({ finalUrl: url });
-    };
-
-    const pending = run(
-      collect(
-        Array.from({ length: 6 }, (_, i) => page(i)),
-        {
-          isCancelled: () => cancelled,
-        }
+        return Effect.sync(() => {
+          aborted.push(url);
+        });
+      });
+    const pending = Effect.runPromise(
+      Effect.provide(
+        collect(
+          Array.from({ length: 6 }, (_, i) => page(i)),
+          { onProgress: (progress) => completed.push(progress.completed) }
+        ),
+        layer(deps)
       ),
-      deps
+      { signal: controller.signal }
     );
-    await fourActive;
-    cancelled = true;
-    release?.();
-    const result = await pending;
 
+    await Promise.resolve();
+    controller.abort();
+    await expect(pending).rejects.toThrow(/interrupted/i);
     expect(started).toBe(4);
-    expect(result.slice(0, 4).every((item) => item.type === 'success')).toBe(
-      true
-    );
-    expect(result.slice(4).map((item) => item.type)).toEqual([
-      'cancelled',
-      'cancelled',
-    ]);
+    expect(aborted.sort()).toEqual([0, 1, 2, 3].map((n) => page(n).url));
+
+    release?.();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(completed).toEqual([]);
+    expect(started).toBe(4);
   });
 });

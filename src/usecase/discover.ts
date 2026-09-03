@@ -1,4 +1,4 @@
-import type { CandidateLink, PageSnapshot, RawLink } from '../entity';
+import type { CandidateLink } from '../entity';
 
 const blockedExtensions =
   /\.(?:pdf|png|jpe?g|gif|webp|avif|svg|ico|mp3|wav|ogg|mp4|webm|woff2?|ttf|otf|zip|tar|gz|rar|7z|exe|dmg|pkg|deb|rpm)$/i;
@@ -41,20 +41,22 @@ const keyFor = (url: URL): string => {
   return `${url.origin}${pathname}${url.search}`;
 };
 
-const labelFor = (link: RawLink, url: URL): string =>
-  text(link.text) ||
-  text(link.ariaLabel) ||
-  text(link.imageAlt) ||
+const labelFor = (link: HTMLAnchorElement, url: URL): string =>
+  text(link.textContent) ||
+  text(link.getAttribute('aria-label')) ||
+  text(link.querySelector('img')?.getAttribute('alt')) ||
   decodeURIComponent(url.pathname) ||
   url.href;
 
-export const discover = (page: PageSnapshot): CandidateLink[] => {
-  const pageUrl = new URL(page.url);
+export const discover = (page: Document): CandidateLink[] => {
+  const pageUrl = new URL(page.URL);
   const seen = new Set<string>();
   const candidates: CandidateLink[] = [];
 
-  for (const link of page.links) {
-    const url = normalize(link.href, pageUrl);
+  for (const [order, link] of [
+    ...page.querySelectorAll<HTMLAnchorElement>('a[href]'),
+  ].entries()) {
+    const url = normalize(link.getAttribute('href') ?? '', pageUrl);
     if (!url || seen.has(keyFor(url))) {
       continue;
     }
@@ -64,7 +66,7 @@ export const discover = (page: PageSnapshot): CandidateLink[] => {
       url: url.href,
       label: labelFor(link, url),
       path: `${url.pathname}${url.search}`,
-      order: link.order,
+      order,
     });
   }
 

@@ -1,19 +1,35 @@
 import { describe, expect, it, vi } from 'vitest';
-import { openPreview } from '../../src/adapter/preview-window';
+import { openPreview } from '../../src/presentation/preview-window';
 
 const createPopup = () => {
   const popupDocument = document.implementation.createHTMLDocument();
+  let onPageHide: EventListener | undefined;
   const popup = {
     document: popupDocument,
     closed: false,
-    close: vi.fn(),
-    focus: vi.fn(),
+    close: vi.fn(() => {
+      popup.closed = true;
+    }),
     print: vi.fn(),
     postMessage: vi.fn(),
     opener: { postMessage: vi.fn() },
+    addEventListener: vi.fn((type: string, listener: unknown) => {
+      if (type === 'pagehide' && typeof listener === 'function') {
+        onPageHide = listener as EventListener;
+      }
+    }),
+    removeEventListener: vi.fn((type: string) => {
+      if (type === 'pagehide') {
+        onPageHide = undefined;
+      }
+    }),
   };
 
-  return { popup, popupDocument };
+  return {
+    popup,
+    popupDocument,
+    pageHide: () => onPageHide?.call(popup, new Event('pagehide')),
+  };
 };
 
 const styleOf = (page: Document, marker: string): string =>
@@ -32,30 +48,27 @@ const block = (source: string, query: string): string => {
   return source.slice(start, end < 0 ? undefined : end + 2);
 };
 
-describe('preview window adapter', () => {
+const cancelMessage = (popup: object, taskId = 'task-id'): MessageEvent =>
+  new MessageEvent('message', {
+    source: popup as Window,
+    data: { type: 'web-printer:cancel', taskId },
+  });
+
+describe('preview window presentation', () => {
   it('returns null when the browser blocks the popup', () => {
-    expect(openPreview(() => null, 'task-id', 'Guide')).toBeNull();
+    expect(openPreview(() => null, 'task-id', 'Guide', vi.fn())).toBeNull();
   });
 
   it('shows progress and supports Print and Close after rendering', () => {
     const { popup, popupDocument } = createPopup();
-    const preview = openPreview(() => popup, 'task-id', 'Guide');
+    const preview = openPreview(() => popup, 'task-id', 'Guide', vi.fn());
 
-    preview?.update({
-      completed: 2,
-      total: 4,
-      state: 'fetching',
-    });
+    preview?.update({ completed: 2, total: 4, state: 'fetching' });
     expect(popupDocument.body.textContent).toContain('2 / 4');
 
     preview?.render({
       title: 'Guide',
-      summary: {
-        succeeded: 1,
-        failed: 0,
-        cancelled: 0,
-        failures: [],
-      },
+      summary: { succeeded: 1, failed: 0, failures: [] },
       items: [
         {
           type: 'article',
@@ -91,7 +104,7 @@ describe('preview window adapter', () => {
 
   it('keeps screen colours readable in a dark colour scheme', () => {
     const { popup, popupDocument } = createPopup();
-    openPreview(() => popup, 'task-id', 'Guide');
+    openPreview(() => popup, 'task-id', 'Guide', vi.fn());
     const css = styleOf(popupDocument, '--wp-bg');
     const dark = block(css, '@media screen and (prefers-color-scheme:dark)');
 
@@ -109,7 +122,7 @@ describe('preview window adapter', () => {
 
   it('forces black on white when printing and keeps the print layout', () => {
     const { popup, popupDocument } = createPopup();
-    openPreview(() => popup, 'task-id', 'Guide');
+    openPreview(() => popup, 'task-id', 'Guide', vi.fn());
     const print = block(styleOf(popupDocument, '--wp-bg'), '@media print');
 
     expect(print).toMatch(/body\{[^}]*background: ?#fff/);
@@ -119,43 +132,62 @@ describe('preview window adapter', () => {
   });
 
   it('accepts cancellation only from its popup with the matching task ID', () => {
-    const { popup, popupDocument } = createPopup();
-    const preview = openPreview(() => popup, 'task-id', 'Guide');
+    const { popup } = createPopup();
+    const onCancel = vi.fn();
+    openPreview(() => popup, 'task-id', 'Guide', onCancel);
 
-    popupDocument
-      .querySelector<HTMLButtonElement>('[data-action="cancel"]')
-      ?.click();
     window.dispatchEvent(
       new MessageEvent('message', {
         source: window,
         data: { type: 'web-printer:cancel', taskId: 'task-id' },
       })
     );
-    window.dispatchEvent(
-      new MessageEvent('message', {
-        source: popup as unknown as Window,
-        data: { type: 'web-printer:cancel', taskId: 'wrong' },
-      })
-    );
+    window.dispatchEvent(cancelMessage(popup, 'wrong'));
+    expect(onCancel).not.toHaveBeenCalled();
 
-    expect(preview?.isCancelled()).toBe(false);
+    window.dispatchEvent(cancelMessage(popup));
+    window.dispatchEvent(cancelMessage(popup));
 
-    window.dispatchEvent(
-      new MessageEvent('message', {
-        source: popup as unknown as Window,
-        data: { type: 'web-printer:cancel', taskId: 'task-id' },
-      })
-    );
-
-    expect(preview?.isCancelled()).toBe(true);
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(popup.close).toHaveBeenCalledOnce();
   });
 
-  it('reports whether the popup was closed', () => {
-    const { popup } = createPopup();
-    const preview = openPreview(() => popup, 'task-id', 'Guide');
-    popup.closed = true;
+  it('cancels once and drops listeners when the popup is closed directly', () => {
+    const { popup, pageHide } = createPopup();
+    const onCancel = vi.fn();
+    const removeMessage = vi.spyOn(window, 'removeEventListener');
+    openPreview(() => popup, 'task-id', 'Guide', onCancel);
 
-    expect(preview?.isCancelled()).toBe(false);
-    expect(preview?.isClosed()).toBe(true);
+    pageHide();
+    pageHide();
+    window.dispatchEvent(cancelMessage(popup));
+
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(popup.close).toHaveBeenCalledOnce();
+    expect(popup.removeEventListener).toHaveBeenCalledWith(
+      'pagehide',
+      expect.any(Function)
+    );
+    expect(removeMessage).toHaveBeenCalledWith('message', expect.any(Function));
+    removeMessage.mockRestore();
+  });
+
+  it('does not cancel when the popup is closed after the preview rendered', () => {
+    const { popup, pageHide } = createPopup();
+    const onCancel = vi.fn();
+    const preview = openPreview(() => popup, 'task-id', 'Guide', onCancel);
+
+    preview?.render({
+      title: 'Guide',
+      summary: { succeeded: 1, failed: 0, failures: [] },
+      items: [],
+    });
+    pageHide();
+
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(popup.removeEventListener).toHaveBeenCalledWith(
+      'pagehide',
+      expect.any(Function)
+    );
   });
 });

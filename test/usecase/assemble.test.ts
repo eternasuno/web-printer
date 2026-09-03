@@ -20,23 +20,17 @@ describe('assemble', () => {
         page: page(1),
         reason: 'HTTP 404',
       },
-      { type: 'cancelled' as const, page: page(2) },
     ]);
 
     expect(result.title).toBe('Documentation');
     expect(result.items.map((item) => item.type)).toEqual([
       'article',
       'failure',
-      'cancelled',
     ]);
-    expect(result.items.map((item) => item.breakBefore)).toEqual([
-      false,
-      true,
-      true,
-    ]);
+    expect(result.items.map((item) => item.breakBefore)).toEqual([false, true]);
   });
 
-  it('summarizes successes, failures, cancellations, and failure details', () => {
+  it('summarizes successes, failures, and failure details', () => {
     const result = assemble('', 'docs.test', [
       {
         type: 'failure',
@@ -48,14 +42,12 @@ describe('assemble', () => {
         page: page(1),
         article: { title: 'Good', contentHtml: '<p>Good</p>' },
       },
-      { type: 'cancelled', page: page(2) },
     ]);
 
     expect(result.title).toBe('docs.test');
     expect(result.summary).toEqual({
       succeeded: 1,
       failed: 1,
-      cancelled: 1,
       failures: [
         {
           label: 'Broken',

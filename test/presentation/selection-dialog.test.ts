@@ -7,7 +7,7 @@ import {
   it,
   vi,
 } from 'vitest';
-import { createLinkSelector } from '../../src/adapter/selection-dialog';
+import { createLinkSelector } from '../../src/presentation/selection-dialog';
 
 const candidates = [
   { url: 'https://docs.test/a', label: 'A', path: '/a', order: 0 },
@@ -15,51 +15,62 @@ const candidates = [
 ];
 
 const showModal = vi.fn(() => undefined);
+const close = vi.fn(() => undefined);
 
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal = showModal;
+  HTMLDialogElement.prototype.close = close;
 });
 
 afterAll(() => {
   Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
+  Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
 });
 
 afterEach(() => {
   showModal.mockClear();
+  close.mockClear();
   document.body.replaceChildren();
-  for (const style of document.querySelectorAll('style')) {
-    if (style.textContent?.includes('data-web-printer-dialog')) {
-      style.remove();
-    }
-  }
 });
 
 const open = () => createLinkSelector(document).select(candidates);
 
+const hostOf = (): HTMLElement => {
+  const host = document.querySelector<HTMLElement>(
+    '[data-web-printer-dialog-host]'
+  );
+  if (!host?.shadowRoot) {
+    throw new Error('expected a shadow host in the page');
+  }
+
+  return host;
+};
+
+const rootOf = (): ShadowRoot => hostOf().shadowRoot as ShadowRoot;
+
 const dialogOf = (): HTMLDialogElement => {
-  const dialog = document.querySelector('dialog');
+  const dialog = rootOf().querySelector('dialog');
   if (!(dialog instanceof HTMLDialogElement)) {
-    throw new Error('expected a dialog in the page');
+    throw new Error('expected a dialog in the shadow root');
   }
 
   return dialog;
 };
 
 const css = (): string =>
-  [...document.querySelectorAll('style')]
+  [...rootOf().querySelectorAll('style')]
     .map((element) => element.textContent ?? '')
-    .filter((text) => text.includes('data-web-printer-dialog'))
     .join('');
 
 const checkboxes = (): HTMLInputElement[] => [
-  ...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+  ...rootOf().querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
 ];
 
 const action = (name: string): HTMLButtonElement | null =>
-  document.querySelector<HTMLButtonElement>(`[data-action="${name}"]`);
+  rootOf().querySelector<HTMLButtonElement>(`[data-action="${name}"]`);
 
 const text = (selector: string): string =>
-  document.querySelector(selector)?.textContent ?? '';
+  rootOf().querySelector(selector)?.textContent ?? '';
 
 const block = (source: string, query: string): string => {
   const start = source.indexOf(query);
@@ -69,16 +80,6 @@ const block = (source: string, query: string): string => {
   const end = source.indexOf('}}', start);
 
   return source.slice(start, end < 0 ? undefined : end + 2);
-};
-
-const scopedSelectors = (source: string): string[] => {
-  const flat = source.replace(/@media[^{]+\{/g, '');
-  const selectors: string[] = [];
-  for (const match of flat.matchAll(/(?:^|[{}])([^{}]+?)\{/g)) {
-    selectors.push(...(match[1] ?? '').split(','));
-  }
-
-  return selectors.map((selector) => selector.trim());
 };
 
 const tick = (): Promise<unknown> =>
@@ -98,7 +99,7 @@ const clickAt = (target: Element, x: number, y: number): void => {
   );
 };
 
-describe('selection dialog adapter', () => {
+describe('selection dialog presentation', () => {
   it('renders every candidate unselected in a scrollable list and disables Start', () => {
     void open();
     const list = dialogOf().querySelector('[data-role="list"]');
@@ -107,37 +108,28 @@ describe('selection dialog adapter', () => {
     expect(checkboxes().every((input) => !input.checked)).toBe(true);
     expect(action('start')?.disabled).toBe(true);
     expect(text('[data-role="count"]')).toContain('0 selected');
-    expect(document.body.textContent).toContain('/a');
+    expect(dialogOf().textContent).toContain('/a');
     expect(list?.querySelector('[title="https://docs.test/a"]')).not.toBeNull();
     expect(css()).toMatch(/\[data-role="list"\][^{]*\{[^}]*overflow: ?auto/);
   });
 
-  it('centres the dialog with styles scoped away from the host page', () => {
+  it('centres the dialog inside an isolated shadow root', () => {
     void open();
     const rules = css();
 
-    expect(dialogOf().hasAttribute('data-web-printer-dialog')).toBe(true);
+    expect(hostOf().tagName).toBe('DIV');
+    expect(hostOf().style.getPropertyValue('all')).toBe('revert');
+    expect(hostOf().style.getPropertyPriority('all')).toBe('important');
+    expect(document.querySelector('dialog')).toBeNull();
+    expect(document.head.querySelectorAll('style')).toHaveLength(0);
     expect(dialogOf().getAttribute('aria-labelledby')).toBe(
       'web-printer-selection-title'
     );
-    expect(rules).toMatch(/all: ?revert/);
-    expect(rules).toMatch(/position: ?fixed/);
+    expect(rules).toMatch(/:host\{[^}]*all: ?revert/);
+    expect(rules).toMatch(/dialog\{[^}]*position: ?fixed/);
     expect(rules).toMatch(/margin: ?auto/);
     expect(rules).toMatch(/background: ?#fff/);
-    expect(rules).toMatch(/::backdrop/);
-    const selectors = scopedSelectors(rules);
-
-    expect(selectors.length).toBeGreaterThan(0);
-    expect(
-      selectors.every((selector) =>
-        selector.includes('data-web-printer-dialog')
-      )
-    ).toBe(true);
-    expect(
-      [...rules.matchAll(/\{([^{}]*)\}/g)]
-        .filter((match) => (match[1] ?? '').includes('all:'))
-        .every((match) => /(?:^|;)all: ?revert(?:;|$)/.test(match[1] ?? ''))
-    ).toBe(true);
+    expect(rules).toMatch(/dialog::backdrop/);
   });
 
   it('keeps every dialog surface readable in a dark colour scheme', () => {
@@ -166,15 +158,15 @@ describe('selection dialog adapter', () => {
     expect(action('deselect-all')).toBeNull();
     expect(action('close')).toBeNull();
     expect(
-      document.querySelector('[data-role="header"] [data-action="select-all"]')
+      rootOf().querySelector('[data-role="header"] [data-action="select-all"]')
     ).not.toBeNull();
     expect(
-      document.querySelector(
+      rootOf().querySelector(
         '[data-role="header"] [data-action="invert-selection"]'
       )
     ).not.toBeNull();
     expect(
-      document.querySelector('[data-role="footer"] [data-action="start"]')
+      rootOf().querySelector('[data-role="footer"] [data-action="start"]')
     ).not.toBeNull();
   });
 
@@ -210,8 +202,9 @@ describe('selection dialog adapter', () => {
     clickAt(dialogOf(), 50, 50);
 
     await expect(pending).resolves.toBeNull();
-    expect(document.querySelector('dialog')).toBeNull();
-    expect(css()).toBe('');
+    expect(close).toHaveBeenCalledOnce();
+    expect(document.querySelector('[data-web-printer-dialog-host]')).toBeNull();
+    expect(document.head.querySelectorAll('style')).toHaveLength(0);
   });
 
   it('keeps the dialog open for clicks inside its box or on its content', async () => {
@@ -228,7 +221,7 @@ describe('selection dialog adapter', () => {
     await tick();
 
     expect(resolved).toBe(false);
-    expect(document.querySelector('dialog')).not.toBeNull();
+    expect(dialogOf()).not.toBeNull();
 
     checkboxes()[0]?.click();
     action('start')?.click();
@@ -241,7 +234,7 @@ describe('selection dialog adapter', () => {
     dialogOf().dispatchEvent(new Event('cancel', { cancelable: true }));
 
     await expect(pending).resolves.toBeNull();
-    expect(document.querySelector('dialog')).toBeNull();
+    expect(document.querySelector('[data-web-printer-dialog-host]')).toBeNull();
   });
 
   it('resolves selected pages in candidate order', async () => {

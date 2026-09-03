@@ -1,8 +1,10 @@
-import type { INotifier } from '../port';
+interface Notifier {
+  show(message: string): void;
+}
 
 const durationMs = 4_000;
 
-export const createNotifier = (page: Document = document): INotifier => ({
+export const createNotifier = (page: Document = document): Notifier => ({
   show: (message) => {
     const toast = page.createElement('div');
     toast.setAttribute('role', 'status');

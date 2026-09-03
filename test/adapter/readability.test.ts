@@ -1,11 +1,8 @@
 import { Effect } from 'effect';
 import { describe, expect, it } from 'vitest';
+import { HtmlDocumentParserLive } from '../../src/adapter/html-document';
 import { ArticleExtractorLive } from '../../src/adapter/readability';
-import { ArticleExtractor } from '../../src/port';
-
-const extractor = Effect.runSync(
-  Effect.provide(ArticleExtractor, ArticleExtractorLive)
-);
+import { ArticleExtractor, HtmlDocumentParser } from '../../src/port';
 
 const articleHtml = `
   <!doctype html>
@@ -20,29 +17,55 @@ const articleHtml = `
           <p>This is the second substantial paragraph with more useful text.</p>
           <pre><code>const value = 1;</code></pre>
           <table><tbody><tr><td>Cell</td></tr></tbody></table>
-          <img src="image.png" alt="Example">
+          <a href="../other">Other</a>
+          <img src="standard.png" srcset="small.png 1x, /large.png 2x" alt="Standard">
+          <picture><source srcset="wide.webp 800w"></picture>
+          <img data-src="lazy.png" data-srcset="lazy-small.png 1x, lazy-large.png 2x" alt="Lazy">
         </article>
       </main>
     </body>
   </html>
 `;
 
+const parse = (html: string, url: string) => {
+  const page = Effect.runSync(
+    Effect.provide(HtmlDocumentParser, HtmlDocumentParserLive)
+  ).parse(html, url);
+  const extractor = Effect.runSync(
+    Effect.provide(ArticleExtractor, ArticleExtractorLive)
+  );
+
+  return extractor.extract(page);
+};
+
 describe('Readability adapter', () => {
-  it('returns project-owned title and content HTML', () => {
-    const result = extractor.extract(
-      articleHtml,
-      'https://docs.example.test/guide'
-    );
+  it('returns the Readability result with resolved resources', () => {
+    const result = parse(articleHtml, 'https://docs.example.test/guide/page');
 
     expect(result?.title).toBe('Fallback title');
-    expect(result?.documentTitle).toBe('Fallback title');
-    expect(result?.contentHtml).toContain('<code>');
-    expect(result?.contentHtml).toContain('Cell');
-    expect(result?.contentHtml).toContain('<img');
+    expect(result?.content).toContain('<code>');
+    expect(result?.content).toContain('Cell');
+    expect(result?.content).toContain('https://docs.example.test/other');
+    expect(result?.content).toContain(
+      'https://docs.example.test/guide/standard.png'
+    );
+    expect(result?.content).toContain(
+      'https://docs.example.test/guide/small.png 1x'
+    );
+    expect(result?.content).toContain('https://docs.example.test/large.png 2x');
+    expect(result?.content).toContain(
+      'https://docs.example.test/guide/wide.webp 800w'
+    );
+    expect(result?.content).toContain(
+      'https://docs.example.test/guide/lazy.png'
+    );
+    expect(result?.content).toContain(
+      'https://docs.example.test/guide/lazy-small.png 1x'
+    );
   });
 
   it('returns null when Readability finds no article', () => {
-    const result = extractor.extract(
+    const result = parse(
       '<html><body></body></html>',
       'https://docs.example.test/empty'
     );
@@ -50,12 +73,16 @@ describe('Readability adapter', () => {
     expect(result).toBeNull();
   });
 
-  it('uses the source URL as the document parsing context', () => {
-    const result = extractor.extract(
-      articleHtml,
-      'https://docs.example.test/guide/page'
-    );
+  it('does not modify the supplied document', () => {
+    const page = Effect.runSync(
+      Effect.provide(HtmlDocumentParser, HtmlDocumentParserLive)
+    ).parse(articleHtml, 'https://docs.example.test/guide/page');
+    const before = page.documentElement.outerHTML;
 
-    expect(result).not.toBeNull();
+    Effect.runSync(
+      Effect.provide(ArticleExtractor, ArticleExtractorLive)
+    ).extract(page);
+
+    expect(page.documentElement.outerHTML).toBe(before);
   });
 });

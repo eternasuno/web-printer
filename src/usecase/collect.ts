@@ -6,46 +6,36 @@ import type {
 } from '../entity';
 import {
   ArticleExtractor,
+  HtmlDocumentParser,
   HtmlSanitizer,
-  HtmlTransformer,
   type IArticleExtractor,
+  type IHtmlDocumentParser,
   type IHtmlSanitizer,
-  type IHtmlTransformer,
   type IPageFetcher,
   PageFetcher,
 } from '../port';
 
 const CONCURRENCY = 4;
-const TIMEOUT_MS = 20_000;
+const TIMEOUT_MS = 10_000;
 const SUCCESS_STATUS_START = 200;
 const REDIRECT_STATUS_START = 300;
 
 export type CollectServices =
   | IPageFetcher
+  | IHtmlDocumentParser
   | IArticleExtractor
-  | IHtmlTransformer
   | IHtmlSanitizer;
 
-type Adapters = {
-  readonly extractor: IArticleExtractor;
-  readonly transformer: IHtmlTransformer;
-  readonly sanitizer: IHtmlSanitizer;
-};
-
 type Options = {
-  readonly isCancelled?: () => boolean;
   readonly onProgress?: (progress: CollectionProgress) => void;
 };
+
+type FetchResponse = Effect.Success<ReturnType<IPageFetcher['fetch']>>;
 
 const failed = (page: SelectedPage, reason: string): CollectedPage => ({
   type: 'failure',
   page,
   reason,
-});
-
-const cancelled = (page: SelectedPage): CollectedPage => ({
-  type: 'cancelled',
-  page,
 });
 
 const contentType = (headers: string): string | null =>
@@ -68,10 +58,14 @@ const firstTitle = (
 const failureReason = (error: unknown): string =>
   error instanceof Error ? error.message : 'Network error';
 
-const collectPageContent = (
+const collected = (
   page: SelectedPage,
-  response: Tampermonkey.Response<undefined>,
-  adapters: Adapters
+  response: FetchResponse,
+  dependencies: {
+    readonly parser: IHtmlDocumentParser;
+    readonly extractor: IArticleExtractor;
+    readonly sanitizer: IHtmlSanitizer;
+  }
 ): CollectedPage => {
   const responseContentType = contentType(response.responseHeaders);
   const finalUrl = response.finalUrl || page.url;
@@ -85,23 +79,19 @@ const collectPageContent = (
     return failed(page, `Unsupported content type: ${responseContentType}`);
   }
 
-  const extracted = adapters.extractor.extract(response.responseText, finalUrl);
-  if (!extracted?.contentHtml.trim()) {
+  const sourcePage = dependencies.parser.parse(response.responseText, finalUrl);
+  const extracted = dependencies.extractor.extract(sourcePage);
+  if (!extracted?.content?.trim()) {
     return failed(page, 'Readability returned no content');
   }
 
   const title = firstTitle(
     extracted.title,
     page.label,
-    extracted.documentTitle,
+    sourcePage.title,
     page.url
   );
-  const transformed = adapters.transformer.transform(
-    extracted.contentHtml,
-    finalUrl,
-    title
-  );
-  const contentHtml = adapters.sanitizer.sanitize(transformed);
+  const contentHtml = dependencies.sanitizer.sanitize(extracted.content);
   if (!contentHtml.trim()) {
     return failed(page, 'Sanitized content is empty');
   }
@@ -117,23 +107,21 @@ export const collectPage = (
   page: SelectedPage
 ): Effect.Effect<CollectedPage, never, CollectServices> =>
   Effect.gen(function* () {
+    const dependencies = {
+      parser: yield* HtmlDocumentParser,
+      extractor: yield* ArticleExtractor,
+      sanitizer: yield* HtmlSanitizer,
+    };
     const fetcher = yield* PageFetcher;
-    const extractor = yield* ArticleExtractor;
-    const transformer = yield* HtmlTransformer;
-    const sanitizer = yield* HtmlSanitizer;
 
-    return yield* Effect.tryPromise({
+    return yield* Effect.try({
       try: () => fetcher.fetch(page.url, TIMEOUT_MS),
       catch: (error) => error,
     }).pipe(
+      Effect.flatten,
       Effect.flatMap((response) =>
         Effect.try({
-          try: () =>
-            collectPageContent(page, response, {
-              extractor,
-              transformer,
-              sanitizer,
-            }),
+          try: () => collected(page, response, dependencies),
           catch: (error) => error,
         })
       ),
@@ -149,25 +137,21 @@ export const collect = (
 ): Effect.Effect<readonly CollectedPage[], never, CollectServices> => {
   let completed = 0;
 
-  const collectPageIfNeeded = (
-    page: SelectedPage
-  ): Effect.Effect<CollectedPage, never, CollectServices> =>
-    options.isCancelled?.()
-      ? Effect.succeed(cancelled(page))
-      : collectPage(page).pipe(
-          Effect.tap(() =>
-            Effect.sync(() => {
-              completed += 1;
-              options.onProgress?.({
-                completed,
-                total: pages.length,
-                state: options.isCancelled?.() ? 'cancelling' : 'fetching',
-              });
-            })
-          )
-        );
-
-  return Effect.forEach(pages, collectPageIfNeeded, {
-    concurrency: CONCURRENCY,
-  });
+  return Effect.forEach(
+    pages,
+    (page) =>
+      collectPage(page).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            completed += 1;
+            options.onProgress?.({
+              completed,
+              total: pages.length,
+              state: 'fetching',
+            });
+          })
+        )
+      ),
+    { concurrency: CONCURRENCY }
+  );
 };

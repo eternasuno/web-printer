@@ -1,11 +1,22 @@
-import type { PrintDocument, PrintItem } from '../entity';
-import type { IPreview } from '../port';
+import type { CollectionProgress, PrintDocument, PrintItem } from '../entity';
 
 type Popup = Pick<
   Window,
-  'document' | 'closed' | 'close' | 'focus' | 'print' | 'postMessage' | 'opener'
+  | 'document'
+  | 'closed'
+  | 'close'
+  | 'print'
+  | 'postMessage'
+  | 'opener'
+  | 'addEventListener'
+  | 'removeEventListener'
 >;
 type OpenWindow = () => Popup | null;
+
+interface Preview {
+  update(progress: CollectionProgress): void;
+  render(document: PrintDocument): void;
+}
 
 const css = `
   :root{--wp-bg:#fff;--wp-fg:#181818;--wp-muted:#555;--wp-line:#ccc;--wp-surface:#f5f5f5}
@@ -48,7 +59,7 @@ const renderItem = (page: Document, item: PrintItem): HTMLElement => {
   } else {
     element.classList.add('placeholder');
     heading.textContent = item.label;
-    body.textContent = item.type === 'failure' ? item.reason : 'Cancelled';
+    body.textContent = item.reason;
   }
   element.append(heading, body);
 
@@ -72,10 +83,27 @@ const receiveCancel =
     }
   };
 
+const renderOutput = (
+  popup: Popup,
+  nav: HTMLElement,
+  root: HTMLElement,
+  output: PrintDocument
+): void => {
+  const page = popup.document;
+  page.title = output.title;
+  const print = action(page, 'print', 'Print');
+  const close = action(page, 'close', 'Close');
+  print.addEventListener('click', () => popup.print());
+  close.addEventListener('click', () => popup.close());
+  nav.replaceChildren(print, close);
+  root.replaceChildren(summary(page, output));
+  root.append(...output.items.map((item) => renderItem(page, item)));
+};
+
 const summary = (page: Document, output: PrintDocument): HTMLElement => {
   const aside = page.createElement('aside');
   const value = output.summary;
-  aside.textContent = `${value.succeeded} succeeded, ${value.failed} failed, ${value.cancelled} cancelled`;
+  aside.textContent = `${value.succeeded} succeeded, ${value.failed} failed`;
   for (const failure of value.failures) {
     const line = page.createElement('p');
     line.textContent = `${failure.label}: ${failure.reason} (${failure.url})`;
@@ -88,52 +116,61 @@ const summary = (page: Document, output: PrintDocument): HTMLElement => {
 export const openPreview = (
   open: OpenWindow = () => window.open('', '_blank'),
   taskId: string,
-  title: string
-): IPreview | null => {
+  title: string,
+  onCancel: () => void
+): Preview | null => {
   const popup = open();
   if (!popup) {
     return null;
   }
 
-  const page = popup.document;
-  page.title = title;
+  const page = Object.assign(popup.document, { title });
   const root = page.createElement('main');
   const status = page.createElement('p');
   const cancel = action(page, 'cancel', 'Cancel');
   const nav = page.createElement('nav');
   const style = page.createElement('style');
+  let settled = false;
+  const teardown = (): void => {
+    if (settled) {
+      return;
+    }
+
+    settled = true;
+    window.removeEventListener('message', message);
+    popup.removeEventListener('pagehide', onPageHide);
+    popup.close();
+    onCancel();
+  };
+  const message = receiveCancel(popup, taskId, teardown);
+  const onPageHide = (): void => teardown();
+
   style.textContent = css;
   status.textContent = 'Preparing…';
   cancel.addEventListener('click', () => {
     popup.opener?.postMessage({ type: 'web-printer:cancel', taskId }, '*');
   });
+  window.addEventListener('message', message);
+  popup.addEventListener('pagehide', onPageHide);
   nav.append(status, cancel);
   page.head.append(style);
   page.body.replaceChildren(nav, root);
 
-  let cancelled = false;
-  window.addEventListener(
-    'message',
-    receiveCancel(popup, taskId, () => {
-      cancelled = true;
-    })
-  );
-
   return {
     update: (progress) => {
-      status.textContent = `${progress.state} ${progress.completed} / ${progress.total}`;
+      if (!settled) {
+        status.textContent = `${progress.state} ${progress.completed} / ${progress.total}`;
+      }
     },
     render: (output) => {
-      page.title = output.title;
-      const print = action(page, 'print', 'Print');
-      const close = action(page, 'close', 'Close');
-      print.addEventListener('click', () => popup.print());
-      close.addEventListener('click', () => popup.close());
-      nav.replaceChildren(print, close);
-      root.replaceChildren(summary(page, output));
-      root.append(...output.items.map((item) => renderItem(page, item)));
+      if (settled) {
+        return;
+      }
+
+      renderOutput(popup, nav, root, output);
+      settled = true;
+      window.removeEventListener('message', message);
+      popup.removeEventListener('pagehide', onPageHide);
     },
-    isCancelled: () => cancelled,
-    isClosed: () => popup.closed,
   };
 };

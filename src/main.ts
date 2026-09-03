@@ -1,28 +1,25 @@
 import { Effect, Layer } from 'effect';
 import { HtmlSanitizerLive } from './adapter/dompurify';
 import { PageFetcherLive } from './adapter/gm-fetch';
-import { HtmlTransformerLive } from './adapter/html-document';
-import { createPageReader } from './adapter/page-dom';
-import { openPreview } from './adapter/preview-window';
+import { HtmlDocumentParserLive } from './adapter/html-document';
 import { ArticleExtractorLive } from './adapter/readability';
-import { createLinkSelector } from './adapter/selection-dialog';
-import { createMenuRegistrar } from './adapter/tampermonkey-menu';
-import { createNotifier } from './adapter/toast';
+import { openPreview } from './presentation/preview-window';
+import { createLinkSelector } from './presentation/selection-dialog';
+import { createNotifier } from './presentation/toast';
 import { assemble } from './usecase/assemble';
 import { collect } from './usecase/collect';
 import { discover } from './usecase/discover';
 
 const CollectionLive = Layer.mergeAll(
   PageFetcherLive,
+  HtmlDocumentParserLive,
   ArticleExtractorLive,
-  HtmlTransformerLive,
   HtmlSanitizerLive
 );
 
-const run = async (): Promise<void> => {
+const run = async (controller: AbortController): Promise<void> => {
   const notifier = createNotifier();
-  const snapshot = createPageReader().readPage();
-  const candidates = discover(snapshot);
+  const candidates = discover(document);
   if (!candidates.length) {
     notifier.show('No pages found');
 
@@ -38,7 +35,8 @@ const run = async (): Promise<void> => {
   const preview = openPreview(
     undefined,
     taskId,
-    snapshot.title || location.hostname
+    document.title || location.hostname,
+    () => controller.abort()
   );
   if (!preview) {
     notifier.show('Allow popups to start Web Printer');
@@ -49,14 +47,13 @@ const run = async (): Promise<void> => {
   const results = await Effect.runPromise(
     Effect.provide(
       collect(selected, {
-        isCancelled: () => preview.isCancelled() || preview.isClosed(),
         onProgress: (progress) => preview.update(progress),
       }),
       CollectionLive
-    )
+    ),
+    { signal: controller.signal }
   );
-  if (preview.isClosed()) {
-    notifier.show('Web Printer task cancelled');
+  if (controller.signal.aborted) {
     return;
   }
 
@@ -65,13 +62,16 @@ const run = async (): Promise<void> => {
     total: selected.length,
     state: 'assembling',
   });
-  preview.render(assemble(snapshot.title, location.hostname, results));
+  preview.render(assemble(document.title, location.hostname, results));
 };
 
-createMenuRegistrar().register('Web Printer', () => {
-  void run().catch((error: unknown) => {
-    createNotifier().show(
-      error instanceof Error ? error.message : 'Unexpected error'
-    );
+GM_registerMenuCommand('Web Printer', () => {
+  const controller = new AbortController();
+  void run(controller).catch((error: unknown) => {
+    if (!controller.signal.aborted) {
+      createNotifier().show(
+        error instanceof Error ? error.message : 'Unexpected error'
+      );
+    }
   });
 });

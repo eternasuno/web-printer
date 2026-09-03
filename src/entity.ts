@@ -1,17 +1,3 @@
-export type RawLink = {
-  readonly href: string;
-  readonly text?: string | null;
-  readonly ariaLabel?: string | null;
-  readonly imageAlt?: string | null;
-  readonly order: number;
-};
-
-export type PageSnapshot = {
-  readonly url: string;
-  readonly title: string;
-  readonly links: readonly RawLink[];
-};
-
 export type CandidateLink = {
   readonly url: string;
   readonly label: string;
@@ -31,12 +17,6 @@ export type SelectionState = {
   readonly canStart: boolean;
 };
 
-export type ExtractedArticle = {
-  readonly title: string | null;
-  readonly documentTitle: string;
-  readonly contentHtml: string;
-};
-
 export type PrintableArticle = {
   readonly title: string;
   readonly contentHtml: string;
@@ -53,13 +33,12 @@ export type CollectedPage =
       readonly type: 'failure';
       readonly page: SelectedPage;
       readonly reason: string;
-    }
-  | { readonly type: 'cancelled'; readonly page: SelectedPage };
+    };
 
 export type CollectionProgress = {
   readonly completed: number;
   readonly total: number;
-  readonly state: 'fetching' | 'cancelling' | 'assembling' | 'completed';
+  readonly state: 'fetching' | 'assembling' | 'completed';
 };
 
 export type PrintItem =
@@ -76,18 +55,11 @@ export type PrintItem =
       readonly url: string;
       readonly reason: string;
       readonly breakBefore: boolean;
-    }
-  | {
-      readonly type: 'cancelled';
-      readonly label: string;
-      readonly url: string;
-      readonly breakBefore: boolean;
     };
 
 export type CollectionSummary = {
   readonly succeeded: number;
   readonly failed: number;
-  readonly cancelled: number;
   readonly failures: readonly {
     readonly label: string;
     readonly url: string;

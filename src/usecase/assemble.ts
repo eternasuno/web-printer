@@ -17,20 +17,11 @@ const itemFor = (result: CollectedPage, index: number): PrintItem => {
     };
   }
 
-  if (result.type === 'failure') {
-    return {
-      type: 'failure',
-      label: result.page.label,
-      url: result.page.url,
-      reason: result.reason,
-      breakBefore,
-    };
-  }
-
   return {
-    type: 'cancelled',
+    type: 'failure',
     label: result.page.label,
     url: result.page.url,
+    reason: result.reason,
     breakBefore,
   };
 };
@@ -51,7 +42,6 @@ const summarize = (results: readonly CollectedPage[]): CollectionSummary => {
   return {
     succeeded: results.filter((result) => result.type === 'success').length,
     failed: failures.length,
-    cancelled: results.filter((result) => result.type === 'cancelled').length,
     failures,
   };
 };

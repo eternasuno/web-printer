@@ -8,11 +8,30 @@ const page = (
     ariaLabel?: string;
     imageAlt?: string;
   }>
-) => ({
-  url: 'https://docs.example.test/guide/start',
-  title: 'Guide',
-  links: links.map((link, order) => ({ ...link, order })),
-});
+): Document => {
+  const result = document.implementation.createHTMLDocument('Guide');
+  Object.defineProperty(result, 'URL', {
+    value: 'https://docs.example.test/guide/start',
+  });
+
+  for (const link of links) {
+    const anchor = result.createElement('a');
+    anchor.href = link.href;
+    anchor.setAttribute('href', link.href);
+    anchor.textContent = link.text ?? '';
+    if (link.ariaLabel) {
+      anchor.setAttribute('aria-label', link.ariaLabel);
+    }
+    if (link.imageAlt) {
+      const image = result.createElement('img');
+      image.alt = link.imageAlt;
+      anchor.append(image);
+    }
+    result.body.append(anchor);
+  }
+
+  return result;
+};
 
 describe('discover', () => {
   it('keeps same-origin HTTP links in DOM order', () => {

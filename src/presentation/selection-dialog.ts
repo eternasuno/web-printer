@@ -1,5 +1,4 @@
 import type { CandidateLink, SelectedPage, SelectionState } from '../entity';
-import type { ILinkSelector } from '../port';
 import {
   createSelection,
   invertSelection,
@@ -8,24 +7,28 @@ import {
   toggleSelection,
 } from '../usecase/select';
 
-const scope = 'data-web-printer-dialog';
+interface LinkSelector {
+  select(candidates: readonly CandidateLink[]): Promise<SelectedPage[] | null>;
+}
+
+const hostAttribute = 'data-web-printer-dialog-host';
 
 const sheet = `
-[${scope}],[${scope}] *,[${scope}]::backdrop{all:revert;color-scheme:light dark}
-[${scope}]{position:fixed;inset:0;margin:auto;display:flex;flex-direction:column;box-sizing:border-box;width:min(36rem,90vw);max-height:min(28rem,80vh);padding:0;border:1px solid #ccc;border-radius:.5rem;background:#fff;color:#111;font:14px/1.5 system-ui,sans-serif;text-align:start;box-shadow:0 1rem 2rem rgba(0,0,0,.25)}
-[${scope}]::backdrop{background:rgba(0,0,0,.4)}
-[${scope}] [data-role="header"],[${scope}] [data-role="footer"]{display:flex;align-items:center;gap:.5rem;padding:.75rem 1rem}
-[${scope}] [data-role="header"]{border-bottom:1px solid #ddd}
-[${scope}] [data-role="footer"]{justify-content:flex-end;border-top:1px solid #ddd}
-[${scope}] [data-role="actions"]{display:flex;gap:.5rem;margin-left:auto}
-[${scope}] h2{margin:0;font-size:1rem;font-weight:600}
-[${scope}] p{margin:0;color:#555}
-[${scope}] [data-role="list"]{flex:1;min-height:0;overflow:auto;padding:.5rem 1rem}
-[${scope}] [data-role="list"] label{display:flex;gap:.5rem;align-items:baseline;padding:.2rem 0}
-[${scope}] small{color:#555;font-size:12px}
-[${scope}] button{padding:.25rem .6rem;border:1px solid #ccc;border-radius:.25rem;background:#f5f5f5;color:#111;font:inherit;cursor:pointer}
-[${scope}] button:disabled{color:#999;cursor:default}
-@media (prefers-color-scheme:dark){[${scope}]{background:#151515;border-color:#4a4a4a;color:#eaeaea}[${scope}] [data-role="header"],[${scope}] [data-role="footer"]{border-color:#3a3a3a}[${scope}] p,[${scope}] small{color:#a8a8a8}[${scope}] button{background:#2a2a2a;border-color:#4a4a4a;color:#eaeaea}[${scope}] button:disabled{color:#8a8a8a}}
+:host{all:revert;color-scheme:light dark}
+dialog{position:fixed;inset:0;margin:auto;display:flex;flex-direction:column;box-sizing:border-box;width:min(36rem,90vw);max-height:min(28rem,80vh);padding:0;border:1px solid #ccc;border-radius:.5rem;background:#fff;color:#111;font:14px/1.5 system-ui,sans-serif;text-align:start;box-shadow:0 1rem 2rem rgba(0,0,0,.25)}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+[data-role="header"],[data-role="footer"]{display:flex;align-items:center;gap:.5rem;padding:.75rem 1rem}
+[data-role="header"]{border-bottom:1px solid #ddd}
+[data-role="footer"]{justify-content:flex-end;border-top:1px solid #ddd}
+[data-role="actions"]{display:flex;gap:.5rem;margin-left:auto}
+h2{margin:0;font-size:1rem;font-weight:600}
+p{margin:0;color:#555}
+[data-role="list"]{flex:1;min-height:0;overflow:auto;padding:.5rem 1rem}
+[data-role="list"] label{display:flex;gap:.5rem;align-items:baseline;padding:.2rem 0}
+small{color:#555;font-size:12px}
+button{padding:.25rem .6rem;border:1px solid #ccc;border-radius:.25rem;background:#f5f5f5;color:#111;font:inherit;cursor:pointer}
+button:disabled{color:#999;cursor:default}
+@media (prefers-color-scheme:dark){dialog{background:#151515;border-color:#4a4a4a;color:#eaeaea}[data-role="header"],[data-role="footer"]{border-color:#3a3a3a}p,small{color:#a8a8a8}button{background:#2a2a2a;border-color:#4a4a4a;color:#eaeaea}button:disabled{color:#8a8a8a}}
 `;
 
 const button = (
@@ -96,7 +99,6 @@ const markup = (
 ): HTMLDialogElement => {
   const start = button(page, 'start', 'Start');
   const dialog = page.createElement('dialog');
-  dialog.setAttribute(scope, '');
   dialog.setAttribute('aria-labelledby', 'web-printer-selection-title');
   dialog.append(
     header(page, [
@@ -132,14 +134,29 @@ const onBackdrop = (dialog: HTMLDialogElement, x: number, y: number) => {
   return x < box.left || x > box.right || y < box.top || y > box.bottom;
 };
 
+const mount = (
+  page: Document,
+  candidates: readonly CandidateLink[]
+): { dialog: HTMLDialogElement; host: HTMLElement } => {
+  const host = page.createElement('div');
+  host.setAttribute(hostAttribute, '');
+  host.style.setProperty('all', 'revert', 'important');
+  const shadow = host.attachShadow({ mode: 'open' });
+  const style = page.createElement('style');
+  style.textContent = sheet;
+  const dialog = markup(page, candidates);
+  shadow.append(style, dialog);
+  page.body.append(host);
+
+  return { dialog, host };
+};
+
 const select = (
   page: Document,
   candidates: readonly CandidateLink[]
-): ReturnType<ILinkSelector['select']> =>
+): ReturnType<LinkSelector['select']> =>
   new Promise((resolve) => {
-    const style = page.createElement('style');
-    style.textContent = sheet;
-    const dialog = markup(page, candidates);
+    const { dialog, host } = mount(page, candidates);
     let state = createSelection(candidates);
     const refresh = (
       next: (current: SelectionState) => SelectionState
@@ -148,8 +165,8 @@ const select = (
       update(dialog, state);
     };
     const finish = (value: SelectedPage[] | null): void => {
-      style.remove();
-      dialog.remove();
+      dialog.close();
+      host.remove();
       resolve(value);
     };
     const bind = (action: string, handler: () => void): void => {
@@ -178,14 +195,12 @@ const select = (
       }
     };
     dialog.oncancel = () => finish(null);
-    page.head.append(style);
-    page.body.append(dialog);
     update(dialog, state);
     dialog.showModal();
   });
 
 export const createLinkSelector = (
   page: Document = document
-): ILinkSelector => ({
+): LinkSelector => ({
   select: (candidates) => select(page, candidates),
 });
