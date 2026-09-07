@@ -1,37 +1,41 @@
+import { expect, it } from '@effect/vitest';
 import { Effect } from 'effect';
-import { describe, expect, it } from 'vitest';
 import { HtmlDocumentParserLive } from '../../src/adapter/html-document';
 import { HtmlDocumentParser } from '../../src/port';
 
-const parser = Effect.runSync(
-  Effect.provide(HtmlDocumentParser, HtmlDocumentParserLive)
-);
-
 const parse = (html: string, url: string) =>
-  Effect.runSync(parser.parse(html, url));
+  Effect.gen(function* () {
+    const parser = yield* HtmlDocumentParser;
 
-describe('HTML document adapter', () => {
-  it('parses HTML with the source URL as its base URI', () => {
-    const page = parse(
-      '<title>Guide</title><a href="../other">Other</a>',
-      'https://docs.example.test/guide/page'
-    );
-
-    expect(page.title).toBe('Guide');
-    expect(page.baseURI).toBe('https://docs.example.test/guide/page');
-    expect(page.querySelector('a')?.href).toBe(
-      'https://docs.example.test/other'
-    );
+    return yield* parser.parse(html, url);
   });
 
-  it('overrides a document-provided base URL', () => {
-    const page = parse(
-      '<base href="https://wrong.test/"><a href="page">Page</a>',
-      'https://docs.example.test/guide/'
-    );
+it.layer(HtmlDocumentParserLive)('HTML document adapter', (it) => {
+  it.effect('parses HTML with the source URL as its base URI', () =>
+    Effect.gen(function* () {
+      const page = yield* parse(
+        '<title>Guide</title><a href="../other">Other</a>',
+        'https://docs.example.test/guide/page'
+      );
 
-    expect(page.querySelector('a')?.href).toBe(
-      'https://docs.example.test/guide/page'
-    );
-  });
+      expect(page.title).toBe('Guide');
+      expect(page.baseURI).toBe('https://docs.example.test/guide/page');
+      expect(page.querySelector('a')?.href).toBe(
+        'https://docs.example.test/other'
+      );
+    })
+  );
+
+  it.effect('overrides a document-provided base URL', () =>
+    Effect.gen(function* () {
+      const page = yield* parse(
+        '<base href="https://wrong.test/"><a href="page">Page</a>',
+        'https://docs.example.test/guide/'
+      );
+
+      expect(page.querySelector('a')?.href).toBe(
+        'https://docs.example.test/guide/page'
+      );
+    })
+  );
 });

@@ -1,5 +1,5 @@
-import { Effect } from 'effect';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from '@effect/vitest';
+import { Effect, Exit, Fiber } from 'effect';
 import { PageFetcherLive } from '../../src/adapter/gm-fetch';
 import { PageFetcher } from '../../src/port';
 
@@ -19,22 +19,6 @@ const response = (
 
 const errorResponse = (error: string): Tampermonkey.ErrorResponse =>
   ({ status: 0, statusText: '', error }) as Tampermonkey.ErrorResponse;
-
-const fetchEffect = (
-  pageUrl: string,
-  timeout: number
-): Effect.Effect<
-  Tampermonkey.Response<undefined>,
-  Tampermonkey.ErrorResponse | Error
-> =>
-  Effect.provide(
-    Effect.gen(function* () {
-      const fetcher = yield* PageFetcher;
-
-      return yield* fetcher.fetch(pageUrl, timeout);
-    }),
-    PageFetcherLive
-  );
 
 // Stubs GM_xmlhttpRequest and resolves with the details of the request the
 // adapter registered, so tests can drive its listeners by hand.
@@ -58,89 +42,108 @@ const stubRequest = (): {
   return { abortCalls: () => abort.mock.calls.length, registered };
 };
 
-describe('GM fetch adapter', () => {
+const fetchEffect = (pageUrl: string, timeout: number) =>
+  Effect.gen(function* () {
+    const fetcher = yield* PageFetcher;
+
+    return yield* fetcher.fetch(pageUrl, timeout);
+  });
+
+it.layer(PageFetcherLive)('GM fetch adapter', (it) => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it('sends a GET request and completes with the GM response', async () => {
-    const request = stubRequest();
-    const pending = Effect.runPromise(fetchEffect(url, timeoutMs));
-    const details = await request.registered;
+  it.effect('sends a GET request and completes with the GM response', () =>
+    Effect.gen(function* () {
+      const request = stubRequest();
+      const fiber = yield* Effect.forkChild(fetchEffect(url, timeoutMs));
+      const details = yield* Effect.promise(() => request.registered);
 
-    expect(details.method).toBe('GET');
-    expect(details.url).toBe(url);
-    expect(details.timeout).toBe(timeoutMs);
+      expect(details.method).toBe('GET');
+      expect(details.url).toBe(url);
+      expect(details.timeout).toBe(timeoutMs);
 
-    details.onload?.call(response(), response());
-    details.ontimeout?.();
+      details.onload?.call(response(), response());
+      details.ontimeout?.();
 
-    await expect(pending).resolves.toMatchObject({ status: 200 });
-    expect(request.abortCalls()).toBe(0);
-  });
+      expect(yield* Fiber.join(fiber)).toMatchObject({ status: 200 });
+      expect(request.abortCalls()).toBe(0);
+    })
+  );
 
-  it('fails with the GM error response', async () => {
-    const request = stubRequest();
-    const failure = errorResponse('boom');
-    const pending = Effect.runPromise(fetchEffect(url, timeoutMs));
-    const details = await request.registered;
+  it.effect('fails with the GM error response', () =>
+    Effect.gen(function* () {
+      const request = stubRequest();
+      const failure = errorResponse('boom');
+      const fiber = yield* Effect.forkChild(fetchEffect(url, timeoutMs));
+      const details = yield* Effect.promise(() => request.registered);
 
-    details.onerror?.call(failure, failure);
+      details.onerror?.call(failure, failure);
 
-    await expect(pending).rejects.toThrow('boom');
-    expect(request.abortCalls()).toBe(0);
-  });
+      const error = yield* Effect.flip(Fiber.join(fiber));
 
-  it('turns a synchronous GM exception into an Effect failure', async () => {
-    vi.stubGlobal('GM_xmlhttpRequest', () => {
-      throw new Error('GM unavailable');
-    });
+      expect(error.message).toBe('boom');
+      expect(request.abortCalls()).toBe(0);
+    })
+  );
 
-    await expect(
-      Effect.runPromise(fetchEffect(url, timeoutMs))
-    ).rejects.toThrow('GM unavailable');
-  });
+  it.effect('turns a synchronous GM exception into an Effect failure', () =>
+    Effect.gen(function* () {
+      vi.stubGlobal('GM_xmlhttpRequest', () => {
+        throw new Error('GM unavailable');
+      });
 
-  it('fails with a Timeout error', async () => {
-    const request = stubRequest();
-    const pending = Effect.runPromise(fetchEffect(url, timeoutMs));
-    const details = await request.registered;
+      const error = yield* Effect.flip(fetchEffect(url, timeoutMs));
 
-    details.ontimeout?.();
+      expect(error.message).toBe('GM unavailable');
+    })
+  );
 
-    await expect(pending).rejects.toThrow('Timeout');
-    expect(request.abortCalls()).toBe(0);
-  });
+  it.effect('fails with a Timeout error', () =>
+    Effect.gen(function* () {
+      const request = stubRequest();
+      const fiber = yield* Effect.forkChild(fetchEffect(url, timeoutMs));
+      const details = yield* Effect.promise(() => request.registered);
 
-  it('aborts the GM request when the effect is interrupted', async () => {
-    const request = stubRequest();
-    const controller = new AbortController();
-    const pending = Effect.runPromise(fetchEffect(url, timeoutMs), {
-      signal: controller.signal,
-    });
-    await request.registered;
+      details.ontimeout?.();
 
-    controller.abort();
+      const error = yield* Effect.flip(Fiber.join(fiber));
 
-    await expect(pending).rejects.toThrow(/interrupted/i);
-    expect(request.abortCalls()).toBe(1);
-  });
+      expect(error.message).toBe('Timeout');
+      expect(request.abortCalls()).toBe(0);
+    })
+  );
 
-  it('aborts once and ignores late GM callbacks after interruption', async () => {
-    const request = stubRequest();
-    const controller = new AbortController();
-    const pending = Effect.runPromise(fetchEffect(url, timeoutMs), {
-      signal: controller.signal,
-    });
-    const details = await request.registered;
+  it.effect('aborts the GM request when the effect is interrupted', () =>
+    Effect.gen(function* () {
+      const request = stubRequest();
+      const fiber = yield* Effect.forkChild(fetchEffect(url, timeoutMs));
+      yield* Effect.promise(() => request.registered);
 
-    controller.abort();
-    await expect(pending).rejects.toThrow(/interrupted/i);
+      yield* Fiber.interrupt(fiber);
+      const exit = yield* Effect.exit(Fiber.join(fiber));
 
-    details.onload?.call(response(), response({ status: 500 }));
-    details.onerror?.call(errorResponse('late'), errorResponse('late'));
-    details.ontimeout?.();
+      expect(Exit.hasInterrupts(exit)).toBe(true);
+      expect(request.abortCalls()).toBe(1);
+    })
+  );
 
-    expect(request.abortCalls()).toBe(1);
-  });
+  it.effect(
+    'aborts once and ignores late GM callbacks after interruption',
+    () =>
+      Effect.gen(function* () {
+        const request = stubRequest();
+        const fiber = yield* Effect.forkChild(fetchEffect(url, timeoutMs));
+        const details = yield* Effect.promise(() => request.registered);
+
+        yield* Fiber.interrupt(fiber);
+
+        details.onload?.call(response(), response({ status: 500 }));
+        details.onerror?.call(errorResponse('late'), errorResponse('late'));
+        details.ontimeout?.();
+
+        expect(request.abortCalls()).toBe(1);
+      })
+  );
 });

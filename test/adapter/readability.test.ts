@@ -1,5 +1,5 @@
-import { Effect } from 'effect';
-import { describe, expect, it } from 'vitest';
+import { expect, it } from '@effect/vitest';
+import { Effect, Layer } from 'effect';
 import { HtmlDocumentParserLive } from '../../src/adapter/html-document';
 import { ArticleExtractorLive } from '../../src/adapter/readability';
 import { ArticleExtractor, HtmlDocumentParser } from '../../src/port';
@@ -27,74 +27,95 @@ const articleHtml = `
   </html>
 `;
 
-const parser = Effect.runSync(
-  Effect.provide(HtmlDocumentParser, HtmlDocumentParserLive)
-);
-const extractor = Effect.runSync(
-  Effect.provide(ArticleExtractor, ArticleExtractorLive)
+const extractorLive = Layer.mergeAll(
+  HtmlDocumentParserLive,
+  ArticleExtractorLive
 );
 
 const parse = (html: string, url: string) =>
-  Effect.runSync(parser.parse(html, url));
+  Effect.gen(function* () {
+    const parser = yield* HtmlDocumentParser;
+
+    return yield* parser.parse(html, url);
+  });
 
 const extract = (html: string, url: string) =>
-  Effect.runSync(
-    Effect.gen(function* () {
-      const page = yield* parser.parse(html, url);
+  Effect.gen(function* () {
+    const extractor = yield* ArticleExtractor;
+    const page = yield* parse(html, url);
 
-      return yield* extractor.extract(page);
+    return yield* extractor.extract(page);
+  });
+
+it.layer(extractorLive)('Readability adapter', (it) => {
+  it.effect('returns the Readability result with resolved resources', () =>
+    Effect.gen(function* () {
+      const result = yield* extract(
+        articleHtml,
+        'https://docs.example.test/guide/page'
+      );
+
+      expect(result?.title).toBe('Fallback title');
+      expect(result?.content).toContain('<code>');
+      expect(result?.content).toContain('Cell');
+      expect(result?.content).toContain('https://docs.example.test/other');
+      expect(result?.content).toContain(
+        'https://docs.example.test/guide/standard.png'
+      );
+      expect(result?.content).toContain(
+        'https://docs.example.test/guide/small.png 1x'
+      );
+      expect(result?.content).toContain(
+        'https://docs.example.test/large.png 2x'
+      );
+      expect(result?.content).toContain(
+        'https://docs.example.test/guide/wide.webp 800w'
+      );
+      expect(result?.content).toContain(
+        'https://docs.example.test/guide/lazy.png'
+      );
+      expect(result?.content).toContain(
+        'https://docs.example.test/guide/lazy-small.png 1x'
+      );
     })
   );
 
-describe('Readability adapter', () => {
-  it('returns the Readability result with resolved resources', () => {
-    const result = extract(articleHtml, 'https://docs.example.test/guide/page');
+  it.effect('returns null when Readability finds no article', () =>
+    Effect.gen(function* () {
+      const result = yield* extract(
+        '<html><body></body></html>',
+        'https://docs.example.test/empty'
+      );
 
-    expect(result?.title).toBe('Fallback title');
-    expect(result?.content).toContain('<code>');
-    expect(result?.content).toContain('Cell');
-    expect(result?.content).toContain('https://docs.example.test/other');
-    expect(result?.content).toContain(
-      'https://docs.example.test/guide/standard.png'
-    );
-    expect(result?.content).toContain(
-      'https://docs.example.test/guide/small.png 1x'
-    );
-    expect(result?.content).toContain('https://docs.example.test/large.png 2x');
-    expect(result?.content).toContain(
-      'https://docs.example.test/guide/wide.webp 800w'
-    );
-    expect(result?.content).toContain(
-      'https://docs.example.test/guide/lazy.png'
-    );
-    expect(result?.content).toContain(
-      'https://docs.example.test/guide/lazy-small.png 1x'
-    );
-  });
+      expect(result).toBeNull();
+    })
+  );
 
-  it('returns null when Readability finds no article', () => {
-    const result = extract(
-      '<html><body></body></html>',
-      'https://docs.example.test/empty'
-    );
+  it.effect('does not modify the supplied document', () =>
+    Effect.gen(function* () {
+      const extractor = yield* ArticleExtractor;
+      const page = yield* parse(
+        articleHtml,
+        'https://docs.example.test/guide/page'
+      );
+      const before = page.documentElement.outerHTML;
 
-    expect(result).toBeNull();
-  });
+      yield* extractor.extract(page);
 
-  it('does not modify the supplied document', () => {
-    const page = parse(articleHtml, 'https://docs.example.test/guide/page');
-    const before = page.documentElement.outerHTML;
+      expect(page.documentElement.outerHTML).toBe(before);
+    })
+  );
 
-    Effect.runSync(extractor.extract(page));
+  it.effect(
+    'reports a synchronous implementation throw as a typed failure',
+    () =>
+      Effect.gen(function* () {
+        const extractor = yield* ArticleExtractor;
+        const failure = yield* Effect.flip(
+          extractor.extract(null as unknown as Document)
+        );
 
-    expect(page.documentElement.outerHTML).toBe(before);
-  });
-
-  it('reports a synchronous implementation throw as a typed failure', () => {
-    const failure = Effect.runSync(
-      Effect.flip(extractor.extract(null as unknown as Document))
-    );
-
-    expect(failure).toBeInstanceOf(Error);
-  });
+        expect(failure).toBeInstanceOf(Error);
+      })
+  );
 });

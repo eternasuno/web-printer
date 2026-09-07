@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.11",
+    "@effect/vitest": "4.0.0-rc.112",
     "@types/tampermonkey": "5.5.0",
     "jsdom": "^30.0.1",
     "typescript": "7.0.2",
