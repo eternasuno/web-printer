@@ -27,20 +27,28 @@ const articleHtml = `
   </html>
 `;
 
-const parse = (html: string, url: string) => {
-  const page = Effect.runSync(
-    Effect.provide(HtmlDocumentParser, HtmlDocumentParserLive)
-  ).parse(html, url);
-  const extractor = Effect.runSync(
-    Effect.provide(ArticleExtractor, ArticleExtractorLive)
-  );
+const parser = Effect.runSync(
+  Effect.provide(HtmlDocumentParser, HtmlDocumentParserLive)
+);
+const extractor = Effect.runSync(
+  Effect.provide(ArticleExtractor, ArticleExtractorLive)
+);
 
-  return extractor.extract(page);
-};
+const parse = (html: string, url: string) =>
+  Effect.runSync(parser.parse(html, url));
+
+const extract = (html: string, url: string) =>
+  Effect.runSync(
+    Effect.gen(function* () {
+      const page = yield* parser.parse(html, url);
+
+      return yield* extractor.extract(page);
+    })
+  );
 
 describe('Readability adapter', () => {
   it('returns the Readability result with resolved resources', () => {
-    const result = parse(articleHtml, 'https://docs.example.test/guide/page');
+    const result = extract(articleHtml, 'https://docs.example.test/guide/page');
 
     expect(result?.title).toBe('Fallback title');
     expect(result?.content).toContain('<code>');
@@ -65,7 +73,7 @@ describe('Readability adapter', () => {
   });
 
   it('returns null when Readability finds no article', () => {
-    const result = parse(
+    const result = extract(
       '<html><body></body></html>',
       'https://docs.example.test/empty'
     );
@@ -74,15 +82,19 @@ describe('Readability adapter', () => {
   });
 
   it('does not modify the supplied document', () => {
-    const page = Effect.runSync(
-      Effect.provide(HtmlDocumentParser, HtmlDocumentParserLive)
-    ).parse(articleHtml, 'https://docs.example.test/guide/page');
+    const page = parse(articleHtml, 'https://docs.example.test/guide/page');
     const before = page.documentElement.outerHTML;
 
-    Effect.runSync(
-      Effect.provide(ArticleExtractor, ArticleExtractorLive)
-    ).extract(page);
+    Effect.runSync(extractor.extract(page));
 
     expect(page.documentElement.outerHTML).toBe(before);
+  });
+
+  it('reports a synchronous implementation throw as a typed failure', () => {
+    const failure = Effect.runSync(
+      Effect.flip(extractor.extract(null as unknown as Document))
+    );
+
+    expect(failure).toBeInstanceOf(Error);
   });
 });

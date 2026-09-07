@@ -1,5 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { Link, Post } from '../../src/entity';
 import { openPreview } from '../../src/presentation/preview-window';
+
+const link = (id: number, label: string): Link => ({
+  id,
+  url: `https://docs.test/${label}`,
+  label,
+  path: `/${label}`,
+});
+
+const success = (label: string): Post => ({
+  type: 'success',
+  link: link(0, label),
+  title: `Title ${label}`,
+  contentHtml: `<p>${label}</p>`,
+  sourceUrl: `https://docs.test/${label}`,
+});
+
+const failure = (label: string, reason: string): Post => ({
+  type: 'failure',
+  link: link(1, label),
+  reason,
+});
 
 const createPopup = () => {
   const popupDocument = document.implementation.createHTMLDocument();
@@ -63,21 +85,12 @@ describe('preview window presentation', () => {
     const { popup, popupDocument } = createPopup();
     const preview = openPreview(() => popup, 'task-id', 'Guide', vi.fn());
 
-    preview?.update({ completed: 2, total: 4, state: 'fetching' });
-    expect(popupDocument.body.textContent).toContain('2 / 4');
+    preview?.update({ completed: 2, total: 4 });
+    expect(popupDocument.body.textContent).toContain('fetching 2 / 4');
 
     preview?.render({
       title: 'Guide',
-      summary: { succeeded: 1, failed: 0, failures: [] },
-      items: [
-        {
-          type: 'article',
-          title: 'Page',
-          contentHtml: '<p>Body</p>',
-          sourceUrl: 'https://docs.test/page',
-          breakBefore: false,
-        },
-      ],
+      posts: [success('Page')],
     });
     popupDocument
       .querySelector<HTMLButtonElement>('[data-action="print"]')
@@ -89,7 +102,10 @@ describe('preview window presentation', () => {
     expect(popup.print).toHaveBeenCalledOnce();
     expect(popup.close).toHaveBeenCalledOnce();
     expect(popupDocument.querySelector('article')?.textContent).toContain(
-      'Body'
+      'Page'
+    );
+    expect(popupDocument.querySelector('article div')?.innerHTML).toBe(
+      '<p>Page</p>'
     );
     expect(
       [...popupDocument.querySelectorAll('nav button')].map((element) =>
@@ -100,6 +116,49 @@ describe('preview window presentation', () => {
     expect(css).toMatch(/nav\{[^}]*display: ?flex/);
     expect(css).toMatch(/nav\{[^}]*justify-content: ?flex-end/);
     expect(css).toMatch(/nav\{[^}]*gap: ?\.5rem/);
+  });
+
+  it('derives the summary counts and failure details from the posts', () => {
+    const { popup, popupDocument } = createPopup();
+    const preview = openPreview(() => popup, 'task-id', 'Guide', vi.fn());
+
+    preview?.render({
+      title: 'Guide',
+      posts: [
+        success('One'),
+        failure('Two', 'HTTP 404'),
+        failure('Three', 'Timeout'),
+      ],
+    });
+    const aside = popupDocument.querySelector('aside');
+
+    expect(aside?.textContent).toContain('1 succeeded, 2 failed');
+    expect(aside?.querySelectorAll('p')).toHaveLength(2);
+    expect(aside?.querySelector('p')?.textContent).toBe(
+      'Two: HTTP 404 (https://docs.test/Two)'
+    );
+  });
+
+  it('breaks every page after the first and marks failures as placeholders', () => {
+    const { popup, popupDocument } = createPopup();
+    const preview = openPreview(() => popup, 'task-id', 'Guide', vi.fn());
+
+    preview?.render({
+      title: 'Guide',
+      posts: [success('One'), failure('Two', 'HTTP 404'), success('Three')],
+    });
+    const articles = [...popupDocument.querySelectorAll('article')];
+
+    expect(articles.map((item) => item.classList.contains('break'))).toEqual([
+      false,
+      true,
+      true,
+    ]);
+    expect(
+      articles.map((item) => item.classList.contains('placeholder'))
+    ).toEqual([false, true, false]);
+    expect(articles.at(1)?.textContent).toContain('Two');
+    expect(articles.at(1)?.textContent).toContain('HTTP 404');
   });
 
   it('keeps screen colours readable in a dark colour scheme', () => {
@@ -177,11 +236,7 @@ describe('preview window presentation', () => {
     const onCancel = vi.fn();
     const preview = openPreview(() => popup, 'task-id', 'Guide', onCancel);
 
-    preview?.render({
-      title: 'Guide',
-      summary: { succeeded: 1, failed: 0, failures: [] },
-      items: [],
-    });
+    preview?.render({ title: 'Guide', posts: [] });
     pageHide();
 
     expect(onCancel).not.toHaveBeenCalled();

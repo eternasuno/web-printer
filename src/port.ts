@@ -5,24 +5,38 @@ export interface IPageFetcher {
   fetch(
     url: string,
     timeoutMs: number
-  ): Effect.Effect<Tampermonkey.Response<undefined>, unknown>;
+  ): Effect.Effect<Tampermonkey.Response<undefined>, Error>;
 }
 
 export interface IHtmlDocumentParser {
-  parse(html: string, url: string): Document;
+  parse(html: string, url: string): Effect.Effect<Document, Error>;
 }
 
 export interface IArticleExtractor {
-  extract(page: Document): ReturnType<Readability['parse']>;
+  extract(
+    page: Document
+  ): Effect.Effect<ReturnType<Readability['parse']>, Error>;
 }
 
 export interface IHtmlSanitizer {
-  sanitize(html: string): string;
+  sanitize(html: string): Effect.Effect<string, Error>;
 }
 
-export const PageFetcher = Context.Service<IPageFetcher>('PageFetcher');
-export const HtmlDocumentParser =
-  Context.Service<IHtmlDocumentParser>('HtmlDocumentParser');
-export const ArticleExtractor =
-  Context.Service<IArticleExtractor>('ArticleExtractor');
-export const HtmlSanitizer = Context.Service<IHtmlSanitizer>('HtmlSanitizer');
+export class PageFetcher extends Context.Service<PageFetcher, IPageFetcher>()(
+  'PageFetcher'
+) {}
+
+export class HtmlDocumentParser extends Context.Service<
+  HtmlDocumentParser,
+  IHtmlDocumentParser
+>()('HtmlDocumentParser') {}
+
+export class ArticleExtractor extends Context.Service<
+  ArticleExtractor,
+  IArticleExtractor
+>()('ArticleExtractor') {}
+
+export class HtmlSanitizer extends Context.Service<
+  HtmlSanitizer,
+  IHtmlSanitizer
+>()('HtmlSanitizer') {}

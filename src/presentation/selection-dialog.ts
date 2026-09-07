@@ -1,14 +1,14 @@
-import type { CandidateLink, SelectedPage, SelectionState } from '../entity';
+import type { Link } from '../entity';
 import {
-  createSelection,
   invertSelection,
+  type SelectedIds,
   selectAll,
-  selectedPages,
+  selectedLinks,
   toggleSelection,
 } from '../usecase/select';
 
 interface LinkSelector {
-  select(candidates: readonly CandidateLink[]): Promise<SelectedPage[] | null>;
+  select(links: readonly Link[]): Promise<Link[] | null>;
 }
 
 const hostAttribute = 'data-web-printer-dialog-host';
@@ -56,19 +56,16 @@ const region = (
   return element;
 };
 
-const candidateList = (
-  page: Document,
-  candidates: readonly CandidateLink[]
-): HTMLElement => {
-  const items = candidates.map((candidate) => {
+const linkList = (page: Document, links: readonly Link[]): HTMLElement => {
+  const items = links.map((link) => {
     const input = page.createElement('input');
     const path = page.createElement('small');
     input.type = 'checkbox';
-    input.value = candidate.url;
-    path.textContent = candidate.path;
+    input.value = String(link.id);
+    path.textContent = link.path;
     const label = page.createElement('label');
-    label.title = candidate.url;
-    label.append(input, candidate.label, ' ', path);
+    label.title = link.url;
+    label.append(input, link.label, ' ', path);
 
     return label;
   });
@@ -93,10 +90,7 @@ const header = (
   ]);
 };
 
-const markup = (
-  page: Document,
-  candidates: readonly CandidateLink[]
-): HTMLDialogElement => {
+const markup = (page: Document, links: readonly Link[]): HTMLDialogElement => {
   const start = button(page, 'start', 'Start');
   const dialog = page.createElement('dialog');
   dialog.setAttribute('aria-labelledby', 'web-printer-selection-title');
@@ -105,26 +99,26 @@ const markup = (
       button(page, 'select-all', 'Select all'),
       button(page, 'invert-selection', 'Invert selection'),
     ]),
-    candidateList(page, candidates),
+    linkList(page, links),
     region(page, 'footer', [start])
   );
 
   return dialog;
 };
 
-const update = (dialog: HTMLDialogElement, state: SelectionState): void => {
+const update = (dialog: HTMLDialogElement, selectedIds: SelectedIds): void => {
   for (const input of dialog.querySelectorAll<HTMLInputElement>('input')) {
-    input.checked = state.selected.has(input.value);
+    input.checked = selectedIds.has(Number(input.value));
   }
   const count = dialog.querySelector('[data-role="count"]');
   const start = dialog.querySelector<HTMLButtonElement>(
     '[data-action="start"]'
   );
   if (count) {
-    count.textContent = `${state.selected.size} selected`;
+    count.textContent = `${selectedIds.size} selected`;
   }
   if (start) {
-    start.disabled = !state.canStart;
+    start.disabled = selectedIds.size === 0;
   }
 };
 
@@ -136,7 +130,7 @@ const onBackdrop = (dialog: HTMLDialogElement, x: number, y: number) => {
 
 const mount = (
   page: Document,
-  candidates: readonly CandidateLink[]
+  links: readonly Link[]
 ): { dialog: HTMLDialogElement; host: HTMLElement } => {
   const host = page.createElement('div');
   host.setAttribute(hostAttribute, '');
@@ -144,7 +138,7 @@ const mount = (
   const shadow = host.attachShadow({ mode: 'open' });
   const style = page.createElement('style');
   style.textContent = sheet;
-  const dialog = markup(page, candidates);
+  const dialog = markup(page, links);
   shadow.append(style, dialog);
   page.body.append(host);
 
@@ -153,18 +147,16 @@ const mount = (
 
 const select = (
   page: Document,
-  candidates: readonly CandidateLink[]
+  links: readonly Link[]
 ): ReturnType<LinkSelector['select']> =>
   new Promise((resolve) => {
-    const { dialog, host } = mount(page, candidates);
-    let state = createSelection(candidates);
-    const refresh = (
-      next: (current: SelectionState) => SelectionState
-    ): void => {
-      state = next(state);
-      update(dialog, state);
+    const { dialog, host } = mount(page, links);
+    let selectedIds: SelectedIds = new Set();
+    const refresh = (next: SelectedIds): void => {
+      selectedIds = next;
+      update(dialog, selectedIds);
     };
-    const finish = (value: SelectedPage[] | null): void => {
+    const finish = (value: Link[] | null): void => {
       dialog.close();
       host.remove();
       resolve(value);
@@ -178,12 +170,14 @@ const select = (
       }
     };
 
-    bind('select-all', () => refresh(selectAll));
-    bind('invert-selection', () => refresh(invertSelection));
-    bind('start', () => finish(selectedPages(state)));
+    bind('select-all', () => refresh(selectAll(links)));
+    bind('invert-selection', () =>
+      refresh(invertSelection(links, selectedIds))
+    );
+    bind('start', () => finish(selectedLinks(links, selectedIds)));
     for (const input of dialog.querySelectorAll<HTMLInputElement>('input')) {
       input.addEventListener('change', () =>
-        refresh((current) => toggleSelection(current, input.value))
+        refresh(toggleSelection(links, selectedIds, Number(input.value)))
       );
     }
     dialog.onclick = (event) => {
@@ -195,12 +189,12 @@ const select = (
       }
     };
     dialog.oncancel = () => finish(null);
-    update(dialog, state);
+    update(dialog, selectedIds);
     dialog.showModal();
   });
 
 export const createLinkSelector = (
   page: Document = document
 ): LinkSelector => ({
-  select: (candidates) => select(page, candidates),
+  select: (links) => select(page, links),
 });

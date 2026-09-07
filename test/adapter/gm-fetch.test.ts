@@ -23,7 +23,10 @@ const errorResponse = (error: string): Tampermonkey.ErrorResponse =>
 const fetchEffect = (
   pageUrl: string,
   timeout: number
-): Effect.Effect<Tampermonkey.Response<undefined>, unknown> =>
+): Effect.Effect<
+  Tampermonkey.Response<undefined>,
+  Tampermonkey.ErrorResponse | Error
+> =>
   Effect.provide(
     Effect.gen(function* () {
       const fetcher = yield* PageFetcher;
@@ -84,7 +87,7 @@ describe('GM fetch adapter', () => {
 
     details.onerror?.call(failure, failure);
 
-    expect(await pending.catch((cause: unknown) => cause)).toBe(failure);
+    await expect(pending).rejects.toThrow('boom');
     expect(request.abortCalls()).toBe(0);
   });
 

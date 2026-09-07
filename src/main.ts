@@ -6,7 +6,6 @@ import { ArticleExtractorLive } from './adapter/readability';
 import { openPreview } from './presentation/preview-window';
 import { createLinkSelector } from './presentation/selection-dialog';
 import { createNotifier } from './presentation/toast';
-import { assemble } from './usecase/assemble';
 import { collect } from './usecase/collect';
 import { discover } from './usecase/discover';
 
@@ -19,24 +18,22 @@ const CollectionLive = Layer.mergeAll(
 
 const run = async (controller: AbortController): Promise<void> => {
   const notifier = createNotifier();
-  const candidates = discover(document);
-  if (!candidates.length) {
+  const links = discover(document);
+  if (!links.length) {
     notifier.show('No pages found');
 
     return;
   }
 
-  const selected = await createLinkSelector().select(candidates);
-  if (!selected?.length) {
+  const selectedLinks = await createLinkSelector().select(links);
+  if (!selectedLinks?.length) {
     return;
   }
 
   const taskId = crypto.randomUUID();
-  const preview = openPreview(
-    undefined,
-    taskId,
-    document.title || location.hostname,
-    () => controller.abort()
+  const title = document.title.trim() || location.hostname;
+  const preview = openPreview(undefined, taskId, title, () =>
+    controller.abort()
   );
   if (!preview) {
     notifier.show('Allow popups to start Web Printer');
@@ -44,11 +41,9 @@ const run = async (controller: AbortController): Promise<void> => {
     return;
   }
 
-  const results = await Effect.runPromise(
+  const posts = await Effect.runPromise(
     Effect.provide(
-      collect(selected, {
-        onProgress: (progress) => preview.update(progress),
-      }),
+      collect(selectedLinks, { onProgress: preview.update }),
       CollectionLive
     ),
     { signal: controller.signal }
@@ -57,12 +52,7 @@ const run = async (controller: AbortController): Promise<void> => {
     return;
   }
 
-  preview.update({
-    completed: selected.length,
-    total: selected.length,
-    state: 'assembling',
-  });
-  preview.render(assemble(document.title, location.hostname, results));
+  preview.render({ title, posts });
 };
 
 GM_registerMenuCommand('Web Printer', () => {

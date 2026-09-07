@@ -7,9 +7,12 @@ const parser = Effect.runSync(
   Effect.provide(HtmlDocumentParser, HtmlDocumentParserLive)
 );
 
+const parse = (html: string, url: string) =>
+  Effect.runSync(parser.parse(html, url));
+
 describe('HTML document adapter', () => {
   it('parses HTML with the source URL as its base URI', () => {
-    const page = parser.parse(
+    const page = parse(
       '<title>Guide</title><a href="../other">Other</a>',
       'https://docs.example.test/guide/page'
     );
@@ -22,7 +25,7 @@ describe('HTML document adapter', () => {
   });
 
   it('overrides a document-provided base URL', () => {
-    const page = parser.parse(
+    const page = parse(
       '<base href="https://wrong.test/"><a href="page">Page</a>',
       'https://docs.example.test/guide/'
     );

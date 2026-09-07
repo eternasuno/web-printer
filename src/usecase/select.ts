@@ -1,51 +1,38 @@
-import type { CandidateLink, SelectedPage, SelectionState } from '../entity';
+import type { Link } from '../entity';
 
-const state = (
-  candidates: readonly CandidateLink[],
-  selected: ReadonlySet<string>
-): SelectionState => ({
-  candidates,
-  selected,
-  canStart: selected.size > 0,
-});
-
-export const createSelection = (
-  candidates: readonly CandidateLink[]
-): SelectionState => state(candidates, new Set());
+export type SelectedIds = ReadonlySet<Link['id']>;
 
 export const toggleSelection = (
-  current: SelectionState,
-  url: string
-): SelectionState => {
-  if (!current.candidates.some((candidate) => candidate.url === url)) {
-    return current;
+  links: readonly Link[],
+  selectedIds: SelectedIds,
+  id: Link['id']
+): SelectedIds => {
+  if (!links.some((link) => link.id === id)) {
+    return selectedIds;
   }
 
-  const selected = new Set(current.selected);
-  if (selected.has(url)) {
-    selected.delete(url);
+  const next = new Set(selectedIds);
+  if (next.has(id)) {
+    next.delete(id);
   } else {
-    selected.add(url);
+    next.add(id);
   }
 
-  return state(current.candidates, selected);
+  return next;
 };
 
-export const selectAll = (current: SelectionState): SelectionState =>
-  state(
-    current.candidates,
-    new Set(current.candidates.map((candidate) => candidate.url))
+export const selectAll = (links: readonly Link[]): SelectedIds =>
+  new Set(links.map((link) => link.id));
+
+export const invertSelection = (
+  links: readonly Link[],
+  selectedIds: SelectedIds
+): SelectedIds =>
+  new Set(
+    links.filter((link) => !selectedIds.has(link.id)).map((link) => link.id)
   );
 
-export const invertSelection = (current: SelectionState): SelectionState =>
-  state(
-    current.candidates,
-    new Set(
-      current.candidates
-        .filter((candidate) => !current.selected.has(candidate.url))
-        .map((candidate) => candidate.url)
-    )
-  );
-
-export const selectedPages = (current: SelectionState): SelectedPage[] =>
-  current.candidates.filter((candidate) => current.selected.has(candidate.url));
+export const selectedLinks = (
+  links: readonly Link[],
+  selectedIds: SelectedIds
+): Link[] => links.filter((link) => selectedIds.has(link.id));

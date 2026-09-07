@@ -9,9 +9,9 @@ import {
 } from 'vitest';
 import { createLinkSelector } from '../../src/presentation/selection-dialog';
 
-const candidates = [
-  { url: 'https://docs.test/a', label: 'A', path: '/a', order: 0 },
-  { url: 'https://docs.test/b', label: 'B', path: '/b', order: 1 },
+const links = [
+  { id: 0, url: 'https://docs.test/a', label: 'A', path: '/a' },
+  { id: 1, url: 'https://docs.test/b', label: 'B', path: '/b' },
 ];
 
 const showModal = vi.fn(() => undefined);
@@ -33,7 +33,7 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-const open = () => createLinkSelector(document).select(candidates);
+const open = () => createLinkSelector(document).select(links);
 
 const hostOf = (): HTMLElement => {
   const host = document.querySelector<HTMLElement>(
@@ -100,11 +100,12 @@ const clickAt = (target: Element, x: number, y: number): void => {
 };
 
 describe('selection dialog presentation', () => {
-  it('renders every candidate unselected in a scrollable list and disables Start', () => {
+  it('renders every link unselected in a scrollable list and disables Start', () => {
     void open();
     const list = dialogOf().querySelector('[data-role="list"]');
 
     expect(showModal).toHaveBeenCalledOnce();
+    expect(checkboxes().map((input) => input.value)).toEqual(['0', '1']);
     expect(checkboxes().every((input) => !input.checked)).toBe(true);
     expect(action('start')?.disabled).toBe(true);
     expect(text('[data-role="count"]')).toContain('0 selected');
@@ -182,12 +183,12 @@ describe('selection dialog presentation', () => {
     expect(checkboxes().some((input) => input.checked)).toBe(false);
     expect(action('start')?.disabled).toBe(true);
 
-    checkboxes()[0]?.click();
+    checkboxes().at(0)?.click();
     action('invert-selection')?.click();
     expect(checkboxes().map((input) => input.checked)).toEqual([false, true]);
   });
 
-  it('selects every candidate with Select all', () => {
+  it('selects every link with Select all', () => {
     void open();
     action('select-all')?.click();
 
@@ -223,9 +224,9 @@ describe('selection dialog presentation', () => {
     expect(resolved).toBe(false);
     expect(dialogOf()).not.toBeNull();
 
-    checkboxes()[0]?.click();
+    checkboxes().at(0)?.click();
     action('start')?.click();
-    await expect(pending).resolves.toEqual([candidates[0]]);
+    await expect(pending).resolves.toEqual([links.at(0)]);
   });
 
   it('resolves null when dismissed with Escape', async () => {
@@ -237,12 +238,21 @@ describe('selection dialog presentation', () => {
     expect(document.querySelector('[data-web-printer-dialog-host]')).toBeNull();
   });
 
-  it('resolves selected pages in candidate order', async () => {
+  it('resolves selected links in discovery order', async () => {
     const pending = open();
-    checkboxes()[1]?.click();
-    checkboxes()[0]?.click();
+    checkboxes().at(1)?.click();
+    checkboxes().at(0)?.click();
     action('start')?.click();
 
-    await expect(pending).resolves.toEqual(candidates);
+    await expect(pending).resolves.toEqual(links);
+  });
+
+  it('round-trips the numeric id through the checkbox value', async () => {
+    const pending = open();
+    checkboxes().at(1)?.click();
+    action('start')?.click();
+
+    await expect(pending).resolves.toEqual([links.at(1)]);
+    expect(document.querySelector('[data-web-printer-dialog-host]')).toBeNull();
   });
 });

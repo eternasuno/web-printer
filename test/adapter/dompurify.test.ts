@@ -7,7 +7,7 @@ const sanitizer = Effect.runSync(
   Effect.provide(HtmlSanitizer, HtmlSanitizerLive)
 );
 
-const sanitize = (html: string) => sanitizer.sanitize(html);
+const sanitize = (html: string) => Effect.runSync(sanitizer.sanitize(html));
 
 const body = (html: string) => {
   const page = document.implementation.createHTMLDocument();

@@ -1,77 +1,87 @@
 import { describe, expect, it } from 'vitest';
+import type { Link } from '../../src/entity';
 import {
-  createSelection,
   invertSelection,
+  type SelectedIds,
   selectAll,
-  selectedPages,
+  selectedLinks,
   toggleSelection,
 } from '../../src/usecase/select';
 
-const candidates = [
-  { url: 'https://docs.test/a', label: 'A', path: '/a', order: 0 },
-  { url: 'https://docs.test/b', label: 'B', path: '/b', order: 1 },
-  { url: 'https://docs.test/c', label: 'C', path: '/c', order: 2 },
-];
+const link = (id: number, label: string): Link => ({
+  id,
+  url: `https://docs.test/${label}`,
+  label,
+  path: `/${label}`,
+});
+
+const links = [link(0, 'a'), link(1, 'b'), link(2, 'c')];
+const none: SelectedIds = new Set<number>();
 
 describe('selection', () => {
-  it('starts with every candidate unselected and cannot start', () => {
-    const state = createSelection(candidates);
+  it('toggles one id without mutating the previous selection', () => {
+    const selected = toggleSelection(links, none, 1);
 
-    expect(state.selected).toEqual(new Set());
-    expect(state.canStart).toBe(false);
+    expect(none.size).toBe(0);
+    expect(selected).toEqual(new Set([1]));
+    expect(toggleSelection(links, selected, 1)).toEqual(new Set());
   });
 
-  it('toggles one candidate without mutating the previous state', () => {
-    const initial = createSelection(candidates);
-    const selected = toggleSelection(initial, candidates[1]?.url ?? '');
+  it('selects every link', () => {
+    const all = selectAll(links);
 
-    expect(initial.selected.size).toBe(0);
-    expect(selected.selected).toEqual(new Set(['https://docs.test/b']));
-    expect(selected.canStart).toBe(true);
+    expect(none).toEqual(new Set<number>());
+    expect(all).toEqual(new Set([0, 1, 2]));
+    expect(all.size).toBe(3);
   });
 
-  it('selects all candidates', () => {
-    const all = selectAll(createSelection(candidates));
+  it('inverts the selection without mutating the previous selection', () => {
+    const all = invertSelection(links, none);
+    const empty = invertSelection(links, all);
 
-    expect(all.selected.size).toBe(3);
-    expect(all.canStart).toBe(true);
-  });
-
-  it('inverts the selection without mutating the previous state', () => {
-    const initial = createSelection(candidates);
-    const all = invertSelection(initial);
-    const none = invertSelection(all);
-
-    expect(all.selected.size).toBe(3);
-    expect(all.canStart).toBe(true);
-    expect(none.selected).toEqual(new Set());
-    expect(none.canStart).toBe(false);
-    expect(initial.selected.size).toBe(0);
+    expect(all).toEqual(new Set([0, 1, 2]));
+    expect(empty).toEqual(new Set<number>());
+    expect(none.size).toBe(0);
   });
 
   it('inverts a partial selection to its complement', () => {
-    let state = createSelection(candidates);
-    state = toggleSelection(state, 'https://docs.test/b');
-    state = toggleSelection(state, 'https://docs.test/c');
+    let selected = toggleSelection(links, none, 1);
+    selected = toggleSelection(links, selected, 2);
 
-    expect(invertSelection(state).selected).toEqual(
-      new Set(['https://docs.test/a'])
-    );
+    expect(invertSelection(links, selected)).toEqual(new Set([0]));
   });
 
-  it('returns selected pages in candidate order rather than click order', () => {
-    let state = createSelection(candidates);
-    state = toggleSelection(state, 'https://docs.test/c');
-    state = toggleSelection(state, 'https://docs.test/a');
+  it('returns selected links in discovery order rather than click order', () => {
+    let selected = toggleSelection(links, none, 2);
+    selected = toggleSelection(links, selected, 0);
 
-    expect(selectedPages(state).map((item) => item.label)).toEqual(['A', 'C']);
+    expect(selectedLinks(links, selected).map((item) => item.label)).toEqual([
+      'a',
+      'c',
+    ]);
   });
 
-  it('ignores an unknown candidate URL', () => {
-    const initial = createSelection(candidates);
+  it('keys selection by id when ids are not contiguous', () => {
+    const sparse = [link(5, 'a'), link(9, 'b'), link(7, 'c')];
+    const all = selectAll(sparse);
 
-    expect(toggleSelection(initial, 'https://docs.test/missing')).toEqual(
-      initial
-    );
+    expect(Array.from(all)).toEqual([5, 9, 7]);
+    expect(selectedLinks(sparse, all).map((item) => item.label)).toEqual([
+      'a',
+      'b',
+      'c',
+    ]);
+    expect(
+      selectedLinks(sparse, toggleSelection(sparse, all, 9)).map(
+        (item) => item.id
+      )
+    ).toEqual([5, 7]);
+  });
+
+  it('ignores an unknown id', () => {
+    const unchanged = toggleSelection(links, none, 99);
+
+    expect(unchanged).toBe(none);
+    expect(selectedLinks(links, unchanged)).toEqual([]);
   });
 });

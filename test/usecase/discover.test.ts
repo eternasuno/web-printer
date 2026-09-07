@@ -44,9 +44,32 @@ describe('discover', () => {
       ])
     );
 
-    expect(result.map(({ url, label }) => ({ url, label }))).toEqual([
-      { url: 'https://docs.example.test/first', label: 'First' },
-      { url: 'https://docs.example.test/second', label: 'Second' },
+    expect(result.map(({ id, url, label }) => ({ id, url, label }))).toEqual([
+      { id: 0, url: 'https://docs.example.test/first', label: 'First' },
+      { id: 1, url: 'https://docs.example.test/second', label: 'Second' },
+    ]);
+  });
+
+  it('assigns contiguous ids after filtering and deduplication', () => {
+    const result = discover(
+      page([
+        { href: '/manual.pdf', text: 'Resource' },
+        { href: 'mailto:team@example.test', text: 'Mail' },
+        { href: 'https://other.test/page', text: 'External' },
+        { href: '#intro', text: 'Fragment' },
+        { href: '/first', text: 'First' },
+        { href: '/first/', text: 'Trailing slash' },
+        { href: '/first?utm_source=x', text: 'Tracking' },
+        { href: '/second', text: 'Second' },
+        { href: '/third', text: 'Third' },
+      ])
+    );
+
+    expect(result.map((item) => item.id)).toEqual([0, 1, 2]);
+    expect(result.map((item) => item.url)).toEqual([
+      'https://docs.example.test/first',
+      'https://docs.example.test/second',
+      'https://docs.example.test/third',
     ]);
   });
 
@@ -59,7 +82,7 @@ describe('discover', () => {
     );
 
     expect(result).toHaveLength(1);
-    expect(result[0]?.url).toBe('https://docs.example.test/guide/start');
+    expect(result.at(0)?.url).toBe('https://docs.example.test/guide/start');
   });
 
   it('removes tracking parameters and preserves other query parameters', () => {
@@ -85,8 +108,9 @@ describe('discover', () => {
     );
 
     expect(result).toHaveLength(1);
-    expect(result[0]?.url).toBe('https://docs.example.test/guide/page/');
-    expect(result[0]?.label).toBe('First');
+    expect(result.at(0)?.id).toBe(0);
+    expect(result.at(0)?.url).toBe('https://docs.example.test/guide/page/');
+    expect(result.at(0)?.label).toBe('First');
   });
 
   it('does not merge distinct meaningful queries or the site root', () => {

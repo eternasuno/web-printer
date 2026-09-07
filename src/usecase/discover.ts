@@ -1,4 +1,4 @@
-import type { CandidateLink } from '../entity';
+import type { Link } from '../entity';
 
 const blockedExtensions =
   /\.(?:pdf|png|jpe?g|gif|webp|avif|svg|ico|mp3|wav|ogg|mp4|webm|woff2?|ttf|otf|zip|tar|gz|rar|7z|exe|dmg|pkg|deb|rpm)$/i;
@@ -41,34 +41,32 @@ const keyFor = (url: URL): string => {
   return `${url.origin}${pathname}${url.search}`;
 };
 
-const labelFor = (link: HTMLAnchorElement, url: URL): string =>
-  text(link.textContent) ||
-  text(link.getAttribute('aria-label')) ||
-  text(link.querySelector('img')?.getAttribute('alt')) ||
+const labelFor = (anchor: HTMLAnchorElement, url: URL): string =>
+  text(anchor.textContent) ||
+  text(anchor.getAttribute('aria-label')) ||
+  text(anchor.querySelector('img')?.getAttribute('alt')) ||
   decodeURIComponent(url.pathname) ||
   url.href;
 
-export const discover = (page: Document): CandidateLink[] => {
+export const discover = (page: Document): Link[] => {
   const pageUrl = new URL(page.URL);
   const seen = new Set<string>();
-  const candidates: CandidateLink[] = [];
+  const links: Link[] = [];
 
-  for (const [order, link] of [
-    ...page.querySelectorAll<HTMLAnchorElement>('a[href]'),
-  ].entries()) {
-    const url = normalize(link.getAttribute('href') ?? '', pageUrl);
+  for (const anchor of page.querySelectorAll<HTMLAnchorElement>('a[href]')) {
+    const url = normalize(anchor.getAttribute('href') ?? '', pageUrl);
     if (!url || seen.has(keyFor(url))) {
       continue;
     }
 
     seen.add(keyFor(url));
-    candidates.push({
+    links.push({
+      id: links.length,
       url: url.href,
-      label: labelFor(link, url),
+      label: labelFor(anchor, url),
       path: `${url.pathname}${url.search}`,
-      order,
     });
   }
 
-  return candidates;
+  return links;
 };

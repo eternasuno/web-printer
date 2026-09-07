@@ -1,4 +1,4 @@
-import type { CollectionProgress, PrintDocument, PrintItem } from '../entity';
+import type { Post, PrintDocument } from '../entity';
 
 type Popup = Pick<
   Window,
@@ -13,8 +13,13 @@ type Popup = Pick<
 >;
 type OpenWindow = () => Popup | null;
 
+type PreviewProgress = {
+  readonly completed: number;
+  readonly total: number;
+};
+
 interface Preview {
-  update(progress: CollectionProgress): void;
+  update(progress: PreviewProgress): void;
   render(document: PrintDocument): void;
 }
 
@@ -45,21 +50,21 @@ const action = (
   return element;
 };
 
-const renderItem = (page: Document, item: PrintItem): HTMLElement => {
+const renderPost = (page: Document, post: Post, index: number): HTMLElement => {
   const element = page.createElement('article');
-  if (item.breakBefore) {
+  if (index > 0) {
     element.classList.add('break');
   }
   const heading = page.createElement('h1');
   const body = page.createElement('div');
 
-  if (item.type === 'article') {
-    heading.textContent = item.title;
-    body.innerHTML = item.contentHtml;
+  if (post.type === 'success') {
+    heading.textContent = post.title;
+    body.innerHTML = post.contentHtml;
   } else {
     element.classList.add('placeholder');
-    heading.textContent = item.label;
-    body.textContent = item.reason;
+    heading.textContent = post.link.label;
+    body.textContent = post.reason;
   }
   element.append(heading, body);
 
@@ -96,17 +101,21 @@ const renderOutput = (
   print.addEventListener('click', () => popup.print());
   close.addEventListener('click', () => popup.close());
   nav.replaceChildren(print, close);
-  root.replaceChildren(summary(page, output));
-  root.append(...output.items.map((item) => renderItem(page, item)));
+  root.replaceChildren(summary(page, output.posts));
+  root.append(
+    ...output.posts.map((post, index) => renderPost(page, post, index))
+  );
 };
 
-const summary = (page: Document, output: PrintDocument): HTMLElement => {
+const summary = (page: Document, posts: readonly Post[]): HTMLElement => {
   const aside = page.createElement('aside');
-  const value = output.summary;
-  aside.textContent = `${value.succeeded} succeeded, ${value.failed} failed`;
-  for (const failure of value.failures) {
+  const failures = posts.flatMap((post) =>
+    post.type === 'failure' ? [post] : []
+  );
+  aside.textContent = `${posts.length - failures.length} succeeded, ${failures.length} failed`;
+  for (const failure of failures) {
     const line = page.createElement('p');
-    line.textContent = `${failure.label}: ${failure.reason} (${failure.url})`;
+    line.textContent = `${failure.link.label}: ${failure.reason} (${failure.link.url})`;
     aside.append(line);
   }
 
@@ -159,7 +168,7 @@ export const openPreview = (
   return {
     update: (progress) => {
       if (!settled) {
-        status.textContent = `${progress.state} ${progress.completed} / ${progress.total}`;
+        status.textContent = `fetching ${progress.completed} / ${progress.total}`;
       }
     },
     render: (output) => {
