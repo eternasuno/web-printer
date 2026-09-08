@@ -22,6 +22,7 @@ const page = (
     if (link.ariaLabel) {
       anchor.setAttribute('aria-label', link.ariaLabel);
     }
+
     if (link.imageAlt) {
       const image = result.createElement('img');
       image.alt = link.imageAlt;
@@ -34,7 +35,7 @@ const page = (
 };
 
 describe('discover', () => {
-  it('keeps same-origin HTTP links in DOM order', () => {
+  it('should keep same-origin HTTP links in DOM order', () => {
     const result = discover(
       page([
         { href: '/first', text: 'First' },
@@ -50,7 +51,7 @@ describe('discover', () => {
     ]);
   });
 
-  it('assigns contiguous ids after filtering and deduplication', () => {
+  it('should assign contiguous ids after filtering and deduplication', () => {
     const result = discover(
       page([
         { href: '/manual.pdf', text: 'Resource' },
@@ -73,7 +74,7 @@ describe('discover', () => {
     ]);
   });
 
-  it('excludes pure fragments but keeps explicit current-page links', () => {
+  it('should exclude pure fragments but keep explicit current-page links', () => {
     const result = discover(
       page([
         { href: '#intro', text: 'Intro' },
@@ -85,7 +86,7 @@ describe('discover', () => {
     expect(result.at(0)?.url).toBe('https://docs.example.test/guide/start');
   });
 
-  it('removes tracking parameters and preserves other query parameters', () => {
+  it('should remove tracking parameters and preserve other query parameters', () => {
     const [result] = discover(
       page([
         {
@@ -98,7 +99,7 @@ describe('discover', () => {
     expect(result?.url).toBe('https://docs.example.test/search?q=effect');
   });
 
-  it('deduplicates fragments, tracking variants, and trailing slashes', () => {
+  it('should deduplicate fragments, tracking variants, and trailing slashes', () => {
     const result = discover(
       page([
         { href: '/guide/page/', text: 'First' },
@@ -113,7 +114,7 @@ describe('discover', () => {
     expect(result.at(0)?.label).toBe('First');
   });
 
-  it('does not merge distinct meaningful queries or the site root', () => {
+  it('should not merge distinct meaningful queries or the site root', () => {
     const result = discover(
       page([
         { href: '/?view=a', text: 'A' },
@@ -138,11 +139,11 @@ describe('discover', () => {
     '/font.woff2',
     '/archive.tar',
     '/installer.dmg',
-  ])('excludes obvious resource URL %s', (href) => {
+  ])('should exclude obvious resource URL %s', (href) => {
     expect(discover(page([{ href, text: 'Resource' }]))).toEqual([]);
   });
 
-  it('uses the specified label fallback order and collapses whitespace', () => {
+  it('should use the specified label fallback order and collapse whitespace', () => {
     const result = discover(
       page([
         { href: '/text', text: '  Visible\n text  ', ariaLabel: 'Aria' },

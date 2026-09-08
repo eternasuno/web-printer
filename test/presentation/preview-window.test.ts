@@ -77,11 +77,11 @@ const cancelMessage = (popup: object, taskId = 'task-id'): MessageEvent =>
   });
 
 describe('preview window presentation', () => {
-  it('returns null when the browser blocks the popup', () => {
+  it('should return null when the browser blocks the popup', () => {
     expect(openPreview(() => null, 'task-id', 'Guide', vi.fn())).toBeNull();
   });
 
-  it('shows progress and supports Print and Close after rendering', () => {
+  it('should show progress and support Print and Close after rendering', () => {
     const { popup, popupDocument } = createPopup();
     const preview = openPreview(() => popup, 'task-id', 'Guide', vi.fn());
 
@@ -118,7 +118,7 @@ describe('preview window presentation', () => {
     expect(css).toMatch(/nav\{[^}]*gap: ?\.5rem/);
   });
 
-  it('derives the summary counts and failure details from the posts', () => {
+  it('should derive the summary counts and failure details from the posts', () => {
     const { popup, popupDocument } = createPopup();
     const preview = openPreview(() => popup, 'task-id', 'Guide', vi.fn());
 
@@ -139,7 +139,7 @@ describe('preview window presentation', () => {
     );
   });
 
-  it('breaks every page after the first and marks failures as placeholders', () => {
+  it('should break every page after the first and mark failures as placeholders', () => {
     const { popup, popupDocument } = createPopup();
     const preview = openPreview(() => popup, 'task-id', 'Guide', vi.fn());
 
@@ -161,7 +161,7 @@ describe('preview window presentation', () => {
     expect(articles.at(1)?.textContent).toContain('HTTP 404');
   });
 
-  it('keeps screen colours readable in a dark colour scheme', () => {
+  it('should keep screen colours readable in a dark colour scheme', () => {
     const { popup, popupDocument } = createPopup();
     openPreview(() => popup, 'task-id', 'Guide', vi.fn());
     const css = styleOf(popupDocument, '--wp-bg');
@@ -179,7 +179,7 @@ describe('preview window presentation', () => {
     expect(css).toMatch(/button\{[^}]*border: ?1px solid var\(--wp-line\)/);
   });
 
-  it('forces black on white when printing and keeps the print layout', () => {
+  it('should force black on white when printing and keep the print layout', () => {
     const { popup, popupDocument } = createPopup();
     openPreview(() => popup, 'task-id', 'Guide', vi.fn());
     const print = block(styleOf(popupDocument, '--wp-bg'), '@media print');
@@ -190,7 +190,7 @@ describe('preview window presentation', () => {
     expect(print).toMatch(/body\{[^}]*max-width: ?none/);
   });
 
-  it('accepts cancellation only from its popup with the matching task ID', () => {
+  it('should accept cancellation only from its popup with the matching task ID', () => {
     const { popup } = createPopup();
     const onCancel = vi.fn();
     openPreview(() => popup, 'task-id', 'Guide', onCancel);
@@ -211,7 +211,7 @@ describe('preview window presentation', () => {
     expect(popup.close).toHaveBeenCalledOnce();
   });
 
-  it('cancels once and drops listeners when the popup is closed directly', () => {
+  it('should cancel once and drop listeners when the popup is closed directly', () => {
     const { popup, pageHide } = createPopup();
     const onCancel = vi.fn();
     const removeMessage = vi.spyOn(window, 'removeEventListener');
@@ -231,7 +231,7 @@ describe('preview window presentation', () => {
     removeMessage.mockRestore();
   });
 
-  it('does not cancel when the popup is closed after the preview rendered', () => {
+  it('should not cancel when the popup is closed after the preview renders', () => {
     const { popup, pageHide } = createPopup();
     const onCancel = vi.fn();
     const preview = openPreview(() => popup, 'task-id', 'Guide', onCancel);

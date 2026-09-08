@@ -100,7 +100,7 @@ const clickAt = (target: Element, x: number, y: number): void => {
 };
 
 describe('selection dialog presentation', () => {
-  it('renders every link unselected in a scrollable list and disables Start', () => {
+  it('should render every link unselected in a scrollable list and disable Start', () => {
     void open();
     const list = dialogOf().querySelector('[data-role="list"]');
 
@@ -114,7 +114,7 @@ describe('selection dialog presentation', () => {
     expect(css()).toMatch(/\[data-role="list"\][^{]*\{[^}]*overflow: ?auto/);
   });
 
-  it('centres the dialog inside an isolated shadow root', () => {
+  it('should centre the dialog inside an isolated shadow root', () => {
     void open();
     const rules = css();
 
@@ -133,7 +133,7 @@ describe('selection dialog presentation', () => {
     expect(rules).toMatch(/dialog::backdrop/);
   });
 
-  it('keeps every dialog surface readable in a dark colour scheme', () => {
+  it('should keep every dialog surface readable in a dark colour scheme', () => {
     void open();
     const rules = css();
     const dark = block(rules, '@media (prefers-color-scheme:dark)');
@@ -149,7 +149,7 @@ describe('selection dialog presentation', () => {
     expect(dark).toContain('button:disabled{color:#8a8a8a}');
   });
 
-  it('keeps bulk actions top right and Start bottom right without Close', () => {
+  it('should keep bulk actions top right and Start bottom right without Close', () => {
     void open();
 
     expect(text('[data-role="header"]')).toContain('Select pages');
@@ -171,7 +171,7 @@ describe('selection dialog presentation', () => {
     ).not.toBeNull();
   });
 
-  it('inverts the selection instead of only clearing it', () => {
+  it('should invert the selection instead of only clearing it', () => {
     void open();
 
     action('invert-selection')?.click();
@@ -188,7 +188,7 @@ describe('selection dialog presentation', () => {
     expect(checkboxes().map((input) => input.checked)).toEqual([false, true]);
   });
 
-  it('selects every link with Select all', () => {
+  it('should select every link with Select all', () => {
     void open();
     action('select-all')?.click();
 
@@ -196,7 +196,7 @@ describe('selection dialog presentation', () => {
     expect(action('start')?.disabled).toBe(false);
   });
 
-  it('closes and resolves null when the backdrop is clicked', async () => {
+  it('should close and resolve null when the backdrop is clicked', async () => {
     const pending = open();
     openBox();
 
@@ -208,7 +208,7 @@ describe('selection dialog presentation', () => {
     expect(document.head.querySelectorAll('style')).toHaveLength(0);
   });
 
-  it('keeps the dialog open for clicks inside its box or on its content', async () => {
+  it('should keep the dialog open for clicks inside its box or on its content', async () => {
     let resolved = false;
     const pending = open().then((pages) => {
       resolved = true;
@@ -229,7 +229,7 @@ describe('selection dialog presentation', () => {
     await expect(pending).resolves.toEqual([links.at(0)]);
   });
 
-  it('resolves null when dismissed with Escape', async () => {
+  it('should resolve null when dismissed with Escape', async () => {
     const pending = open();
 
     dialogOf().dispatchEvent(new Event('cancel', { cancelable: true }));
@@ -238,7 +238,7 @@ describe('selection dialog presentation', () => {
     expect(document.querySelector('[data-web-printer-dialog-host]')).toBeNull();
   });
 
-  it('resolves selected links in discovery order', async () => {
+  it('should resolve selected links in discovery order', async () => {
     const pending = open();
     checkboxes().at(1)?.click();
     checkboxes().at(0)?.click();
@@ -247,7 +247,7 @@ describe('selection dialog presentation', () => {
     await expect(pending).resolves.toEqual(links);
   });
 
-  it('round-trips the numeric id through the checkbox value', async () => {
+  it('should round-trip the numeric id through the checkbox value', async () => {
     const pending = open();
     checkboxes().at(1)?.click();
     action('start')?.click();

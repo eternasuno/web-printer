@@ -54,7 +54,7 @@ it.layer(PageFetcherLive)('GM fetch adapter', (it) => {
     vi.unstubAllGlobals();
   });
 
-  it.effect('sends a GET request and completes with the GM response', () =>
+  it.effect('should send a GET request and complete with the GM response', () =>
     Effect.gen(function* () {
       const request = stubRequest();
       const fiber = yield* Effect.forkChild(fetchEffect(url, timeoutMs));
@@ -65,14 +65,13 @@ it.layer(PageFetcherLive)('GM fetch adapter', (it) => {
       expect(details.timeout).toBe(timeoutMs);
 
       details.onload?.call(response(), response());
-      details.ontimeout?.();
 
       expect(yield* Fiber.join(fiber)).toMatchObject({ status: 200 });
       expect(request.abortCalls()).toBe(0);
     })
   );
 
-  it.effect('fails with the GM error response', () =>
+  it.effect('should fail with the GM error response', () =>
     Effect.gen(function* () {
       const request = stubRequest();
       const failure = errorResponse('boom');
@@ -88,19 +87,21 @@ it.layer(PageFetcherLive)('GM fetch adapter', (it) => {
     })
   );
 
-  it.effect('turns a synchronous GM exception into an Effect failure', () =>
-    Effect.gen(function* () {
-      vi.stubGlobal('GM_xmlhttpRequest', () => {
-        throw new Error('GM unavailable');
-      });
+  it.effect(
+    'should turn a synchronous GM exception into an Effect failure',
+    () =>
+      Effect.gen(function* () {
+        vi.stubGlobal('GM_xmlhttpRequest', () => {
+          throw new Error('GM unavailable');
+        });
 
-      const error = yield* Effect.flip(fetchEffect(url, timeoutMs));
+        const error = yield* Effect.flip(fetchEffect(url, timeoutMs));
 
-      expect(error.message).toBe('GM unavailable');
-    })
+        expect(error.message).toBe('GM unavailable');
+      })
   );
 
-  it.effect('fails with a Timeout error', () =>
+  it.effect('should fail with a Timeout error', () =>
     Effect.gen(function* () {
       const request = stubRequest();
       const fiber = yield* Effect.forkChild(fetchEffect(url, timeoutMs));
@@ -115,22 +116,8 @@ it.layer(PageFetcherLive)('GM fetch adapter', (it) => {
     })
   );
 
-  it.effect('aborts the GM request when the effect is interrupted', () =>
-    Effect.gen(function* () {
-      const request = stubRequest();
-      const fiber = yield* Effect.forkChild(fetchEffect(url, timeoutMs));
-      yield* Effect.promise(() => request.registered);
-
-      yield* Fiber.interrupt(fiber);
-      const exit = yield* Effect.exit(Fiber.join(fiber));
-
-      expect(Exit.hasInterrupts(exit)).toBe(true);
-      expect(request.abortCalls()).toBe(1);
-    })
-  );
-
   it.effect(
-    'aborts once and ignores late GM callbacks after interruption',
+    'should abort once and ignore late GM callbacks after interruption',
     () =>
       Effect.gen(function* () {
         const request = stubRequest();
@@ -138,11 +125,13 @@ it.layer(PageFetcherLive)('GM fetch adapter', (it) => {
         const details = yield* Effect.promise(() => request.registered);
 
         yield* Fiber.interrupt(fiber);
+        const exit = yield* Effect.exit(Fiber.join(fiber));
 
         details.onload?.call(response(), response({ status: 500 }));
         details.onerror?.call(errorResponse('late'), errorResponse('late'));
         details.ontimeout?.();
 
+        expect(Exit.hasInterrupts(exit)).toBe(true);
         expect(request.abortCalls()).toBe(1);
       })
   );

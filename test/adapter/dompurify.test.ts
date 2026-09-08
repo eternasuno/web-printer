@@ -18,7 +18,7 @@ const body = (html: string) => {
 };
 
 it.layer(HtmlSanitizerLive)('DOMPurify adapter', (it) => {
-  it.effect('removes executable and embedded content', () =>
+  it.effect('should remove executable and embedded content', () =>
     Effect.gen(function* () {
       const output = body(
         yield* sanitize(`
@@ -39,7 +39,7 @@ it.layer(HtmlSanitizerLive)('DOMPurify adapter', (it) => {
     })
   );
 
-  it.effect('removes inline styles and dangerous URL protocols', () =>
+  it.effect('should remove inline styles and dangerous URL protocols', () =>
     Effect.gen(function* () {
       const output = body(
         yield* sanitize(`
@@ -57,7 +57,7 @@ it.layer(HtmlSanitizerLive)('DOMPurify adapter', (it) => {
     })
   );
 
-  it.effect('preserves documentation structure', () =>
+  it.effect('should preserve documentation structure', () =>
     Effect.gen(function* () {
       const output = body(
         yield* sanitize(`

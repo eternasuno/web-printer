@@ -11,7 +11,7 @@ const parse = (html: string, url: string) =>
   });
 
 it.layer(HtmlDocumentParserLive)('HTML document adapter', (it) => {
-  it.effect('parses HTML with the source URL as its base URI', () =>
+  it.effect('should parse HTML with the source URL as its base URI', () =>
     Effect.gen(function* () {
       const page = yield* parse(
         '<title>Guide</title><a href="../other">Other</a>',
@@ -26,7 +26,7 @@ it.layer(HtmlDocumentParserLive)('HTML document adapter', (it) => {
     })
   );
 
-  it.effect('overrides a document-provided base URL', () =>
+  it.effect('should override a document-provided base URL', () =>
     Effect.gen(function* () {
       const page = yield* parse(
         '<base href="https://wrong.test/"><a href="page">Page</a>',

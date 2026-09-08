@@ -48,39 +48,41 @@ const extract = (html: string, url: string) =>
   });
 
 it.layer(extractorLive)('Readability adapter', (it) => {
-  it.effect('returns the Readability result with resolved resources', () =>
-    Effect.gen(function* () {
-      const result = yield* extract(
-        articleHtml,
-        'https://docs.example.test/guide/page'
-      );
+  it.effect(
+    'should return the Readability result with resolved resources',
+    () =>
+      Effect.gen(function* () {
+        const result = yield* extract(
+          articleHtml,
+          'https://docs.example.test/guide/page'
+        );
 
-      expect(result?.title).toBe('Fallback title');
-      expect(result?.content).toContain('<code>');
-      expect(result?.content).toContain('Cell');
-      expect(result?.content).toContain('https://docs.example.test/other');
-      expect(result?.content).toContain(
-        'https://docs.example.test/guide/standard.png'
-      );
-      expect(result?.content).toContain(
-        'https://docs.example.test/guide/small.png 1x'
-      );
-      expect(result?.content).toContain(
-        'https://docs.example.test/large.png 2x'
-      );
-      expect(result?.content).toContain(
-        'https://docs.example.test/guide/wide.webp 800w'
-      );
-      expect(result?.content).toContain(
-        'https://docs.example.test/guide/lazy.png'
-      );
-      expect(result?.content).toContain(
-        'https://docs.example.test/guide/lazy-small.png 1x'
-      );
-    })
+        expect(result?.title).toBe('Fallback title');
+        expect(result?.content).toContain('<code>');
+        expect(result?.content).toContain('Cell');
+        expect(result?.content).toContain('https://docs.example.test/other');
+        expect(result?.content).toContain(
+          'https://docs.example.test/guide/standard.png'
+        );
+        expect(result?.content).toContain(
+          'https://docs.example.test/guide/small.png 1x'
+        );
+        expect(result?.content).toContain(
+          'https://docs.example.test/large.png 2x'
+        );
+        expect(result?.content).toContain(
+          'https://docs.example.test/guide/wide.webp 800w'
+        );
+        expect(result?.content).toContain(
+          'https://docs.example.test/guide/lazy.png'
+        );
+        expect(result?.content).toContain(
+          'https://docs.example.test/guide/lazy-small.png 1x'
+        );
+      })
   );
 
-  it.effect('returns null when Readability finds no article', () =>
+  it.effect('should return null when Readability finds no article', () =>
     Effect.gen(function* () {
       const result = yield* extract(
         '<html><body></body></html>',
@@ -91,7 +93,7 @@ it.layer(extractorLive)('Readability adapter', (it) => {
     })
   );
 
-  it.effect('does not modify the supplied document', () =>
+  it.effect('should not modify the supplied document', () =>
     Effect.gen(function* () {
       const extractor = yield* ArticleExtractor;
       const page = yield* parse(
@@ -107,7 +109,7 @@ it.layer(extractorLive)('Readability adapter', (it) => {
   );
 
   it.effect(
-    'reports a synchronous implementation throw as a typed failure',
+    'should report a synchronous implementation throw as a typed failure',
     () =>
       Effect.gen(function* () {
         const extractor = yield* ArticleExtractor;
