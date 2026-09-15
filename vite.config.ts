@@ -15,7 +15,12 @@ export default defineConfig({
         author: 'eternasuno',
         description: 'Merge same-origin documentation pages for printing',
         match: ['*://*/*'],
-        grant: ['GM_registerMenuCommand', 'GM_xmlhttpRequest'],
+        grant: [
+          'GM_registerMenuCommand',
+          'GM_xmlhttpRequest',
+          'GM_getValue',
+          'GM_setValue',
+        ],
       },
     }),
   ],

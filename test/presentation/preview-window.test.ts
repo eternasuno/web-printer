@@ -78,12 +78,24 @@ const cancelMessage = (popup: object, taskId = 'task-id'): MessageEvent =>
 
 describe('preview window presentation', () => {
   it('should return null when the browser blocks the popup', () => {
-    expect(openPreview(() => null, 'task-id', 'Guide', vi.fn())).toBeNull();
+    expect(
+      openPreview({
+        open: () => null,
+        taskId: 'task-id',
+        title: 'Guide',
+        onCancel: vi.fn(),
+      })
+    ).toBeNull();
   });
 
   it('should show progress and support Print and Close after rendering', () => {
     const { popup, popupDocument } = createPopup();
-    const preview = openPreview(() => popup, 'task-id', 'Guide', vi.fn());
+    const preview = openPreview({
+      open: () => popup,
+      taskId: 'task-id',
+      title: 'Guide',
+      onCancel: vi.fn(),
+    });
 
     preview?.update({ completed: 2, total: 4 });
     expect(popupDocument.body.textContent).toContain('fetching 2 / 4');
@@ -120,7 +132,12 @@ describe('preview window presentation', () => {
 
   it('should derive the summary counts and failure details from the posts', () => {
     const { popup, popupDocument } = createPopup();
-    const preview = openPreview(() => popup, 'task-id', 'Guide', vi.fn());
+    const preview = openPreview({
+      open: () => popup,
+      taskId: 'task-id',
+      title: 'Guide',
+      onCancel: vi.fn(),
+    });
 
     preview?.render({
       title: 'Guide',
@@ -139,9 +156,42 @@ describe('preview window presentation', () => {
     );
   });
 
+  it('should expose a linked table of contents for every post', () => {
+    const { popup, popupDocument } = createPopup();
+    const preview = openPreview({
+      open: () => popup,
+      taskId: 'task-id',
+      title: 'Guide',
+      onCancel: vi.fn(),
+    });
+
+    preview?.render({
+      title: 'Guide',
+      posts: [success('One'), failure('Two', 'HTTP 404')],
+    });
+    const articles = [...popupDocument.querySelectorAll('article')];
+    const toc = popupDocument.querySelector('aside ol');
+    const anchors = [...(toc?.querySelectorAll('a') ?? [])];
+
+    expect(articles.map((item) => item.id)).toEqual(['post-0', 'post-1']);
+    expect(anchors.map((item) => item.getAttribute('href'))).toEqual([
+      '#post-0',
+      '#post-1',
+    ]);
+    expect(anchors.map((item) => item.textContent)).toEqual([
+      'Title One',
+      'Two',
+    ]);
+  });
+
   it('should break every page after the first and mark failures as placeholders', () => {
     const { popup, popupDocument } = createPopup();
-    const preview = openPreview(() => popup, 'task-id', 'Guide', vi.fn());
+    const preview = openPreview({
+      open: () => popup,
+      taskId: 'task-id',
+      title: 'Guide',
+      onCancel: vi.fn(),
+    });
 
     preview?.render({
       title: 'Guide',
@@ -163,10 +213,16 @@ describe('preview window presentation', () => {
 
   it('should keep screen colours readable in a dark colour scheme', () => {
     const { popup, popupDocument } = createPopup();
-    openPreview(() => popup, 'task-id', 'Guide', vi.fn());
+    openPreview({
+      open: () => popup,
+      taskId: 'task-id',
+      title: 'Guide',
+      onCancel: vi.fn(),
+    });
     const css = styleOf(popupDocument, '--wp-bg');
     const dark = block(css, '@media screen and (prefers-color-scheme:dark)');
 
+    expect(css).toContain('html{scroll-behavior:smooth}');
     for (const token of ['--wp-bg', '--wp-fg', '--wp-muted', '--wp-line']) {
       expect(css).toContain(`${token}:`);
       expect(dark).toContain(token);
@@ -181,7 +237,12 @@ describe('preview window presentation', () => {
 
   it('should force black on white when printing and keep the print layout', () => {
     const { popup, popupDocument } = createPopup();
-    openPreview(() => popup, 'task-id', 'Guide', vi.fn());
+    openPreview({
+      open: () => popup,
+      taskId: 'task-id',
+      title: 'Guide',
+      onCancel: vi.fn(),
+    });
     const print = block(styleOf(popupDocument, '--wp-bg'), '@media print');
 
     expect(print).toMatch(/body\{[^}]*background: ?#fff/);
@@ -193,7 +254,12 @@ describe('preview window presentation', () => {
   it('should accept cancellation only from its popup with the matching task ID', () => {
     const { popup } = createPopup();
     const onCancel = vi.fn();
-    openPreview(() => popup, 'task-id', 'Guide', onCancel);
+    openPreview({
+      open: () => popup,
+      taskId: 'task-id',
+      title: 'Guide',
+      onCancel,
+    });
 
     window.dispatchEvent(
       new MessageEvent('message', {
@@ -215,7 +281,12 @@ describe('preview window presentation', () => {
     const { popup, pageHide } = createPopup();
     const onCancel = vi.fn();
     const removeMessage = vi.spyOn(window, 'removeEventListener');
-    openPreview(() => popup, 'task-id', 'Guide', onCancel);
+    openPreview({
+      open: () => popup,
+      taskId: 'task-id',
+      title: 'Guide',
+      onCancel,
+    });
 
     pageHide();
     pageHide();
@@ -234,7 +305,12 @@ describe('preview window presentation', () => {
   it('should not cancel when the popup is closed after the preview renders', () => {
     const { popup, pageHide } = createPopup();
     const onCancel = vi.fn();
-    const preview = openPreview(() => popup, 'task-id', 'Guide', onCancel);
+    const preview = openPreview({
+      open: () => popup,
+      taskId: 'task-id',
+      title: 'Guide',
+      onCancel,
+    });
 
     preview?.render({ title: 'Guide', posts: [] });
     pageHide();

@@ -8,8 +8,8 @@ Web Printer is a personal Tampermonkey userscript that discovers same-origin lin
 
 1. Open a documentation index page.
 2. Run **Web Printer** from the Tampermonkey menu.
-3. Select the pages to include, then click **Start**.
-4. Allow the site to open a popup window.
+3. Refine discovery with a CSS selector if needed, select the pages to include, then click **Start**.
+4. Allow the site to open a popup window. If it is blocked, allow popups for the site and run Web Printer again.
 5. Review the generated document and click **Print** to print it or save it as PDF.
 
 The userscript matches HTTP and HTTPS pages, but does not scan the DOM, send requests, or display controls until invoked from the Tampermonkey menu. It is intended for publicly accessible pages and does not bypass authentication, paywalls, or access controls.
@@ -25,7 +25,7 @@ The userscript matches HTTP and HTTPS pages, but does not scan the DOM, send req
 - Derives labels from link text, `aria-label`, child image `alt`, pathname, or the full URL.
 - Shows a notification instead of an empty dialog when no candidates are found.
 
-The selection dialog starts empty and supports individual selection, selecting all, and inverting the selection. Output always follows the original DOM order.
+The selection dialog initially selects every discovered page and supports individual selection, selecting all, and inverting the selection. Enter an optional CSS selector to restrict discovery, then apply it with **Apply** or Enter. Invalid selectors and selectors with no matches leave the current list unchanged; selections are preserved for URLs that remain. A selector that finds links is remembered per origin for later runs. Output always follows discovery order.
 
 ### Collection
 
@@ -42,7 +42,7 @@ Relative links and images rely on Readability's URL conversion. Lazy-loading att
 ### Preview and printing
 
 - Renders each successful page as a separate article and starts every article after the first on a new page.
-- Shows a success/failure summary and failure details.
+- Shows a success/failure summary, failure details, and a linked table of contents for every article and failure placeholder.
 - Provides **Print** and **Close** controls without opening the print dialog automatically.
 - Hides controls when printing and includes styles for text, code blocks, tables, images, and page breaks.
 - Does not currently add a separate source link to successful articles.
@@ -52,7 +52,7 @@ Relative links and images rely on Readability's URL conversion. Lazy-loading att
 Web Printer does not provide:
 
 - Recursive crawling, sitemap imports, or cross-origin crawling
-- XPath/CSS selector input or site-specific adapters
+- XPath selector input or site-specific adapters
 - Extractors other than Readability
 - Search, filtering, grouping, drag-and-drop ordering, or saved selections
 - Request retries or configurable concurrency, timeouts, and headers
@@ -90,7 +90,7 @@ src/
 ├── port.ts
 ├── usecase/       # Discovery, selection, and collection
 ├── adapter/       # GM requests, HTML parsing, Readability, DOMPurify
-├── presentation/  # Selection dialog, preview window, toast
+├── presentation/  # Selection dialog, preview window, toast, shared DOM helpers
 └── main.ts        # Userscript entry point and dependency composition
 ```
 

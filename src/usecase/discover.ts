@@ -9,7 +9,7 @@ const text = (value?: string | null): string =>
   value?.replace(/\s+/g, ' ').trim() ?? '';
 
 const normalize = (href: string, pageUrl: URL): URL | null => {
-  if (href.trim().startsWith('#')) {
+  if (!href.trim() || href.trim().startsWith('#')) {
     return null;
   }
 
@@ -48,12 +48,12 @@ const labelFor = (anchor: HTMLAnchorElement, url: URL): string =>
   decodeURIComponent(url.pathname) ||
   url.href;
 
-export const discover = (page: Document): Link[] => {
+export const discover = (page: Document, selector = 'a[href]'): Link[] => {
   const pageUrl = new URL(page.URL);
   const seen = new Set<string>();
   const links: Link[] = [];
 
-  for (const anchor of page.querySelectorAll<HTMLAnchorElement>('a[href]')) {
+  for (const anchor of page.querySelectorAll<HTMLAnchorElement>(selector)) {
     const url = normalize(anchor.getAttribute('href') ?? '', pageUrl);
     if (!url || seen.has(keyFor(url))) {
       continue;

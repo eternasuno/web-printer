@@ -160,4 +160,26 @@ describe('discover', () => {
       '/path',
     ]);
   });
+
+  it('should scope discovery to anchors matching the given selector', () => {
+    const doc = document.implementation.createHTMLDocument('Guide');
+    Object.defineProperty(doc, 'URL', {
+      value: 'https://docs.example.test/guide/start',
+    });
+    const nav = doc.createElement('nav');
+    const inside = doc.createElement('a');
+    inside.setAttribute('href', '/inside');
+    nav.append(inside);
+    const outside = doc.createElement('a');
+    outside.setAttribute('href', '/outside');
+    doc.body.append(nav, outside);
+
+    expect(discover(doc, 'nav a').map((link) => link.path)).toEqual([
+      '/inside',
+    ]);
+  });
+
+  it('should skip anchors without href matched by a custom selector', () => {
+    expect(discover(page([{ href: '', text: 'Empty' }]), 'a')).toEqual([]);
+  });
 });

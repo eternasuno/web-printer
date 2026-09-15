@@ -100,15 +100,15 @@ const clickAt = (target: Element, x: number, y: number): void => {
 };
 
 describe('selection dialog presentation', () => {
-  it('should render every link unselected in a scrollable list and disable Start', () => {
+  it('should render every link selected in a scrollable list and enable Start', () => {
     void open();
     const list = dialogOf().querySelector('[data-role="list"]');
 
     expect(showModal).toHaveBeenCalledOnce();
     expect(checkboxes().map((input) => input.value)).toEqual(['0', '1']);
-    expect(checkboxes().every((input) => !input.checked)).toBe(true);
-    expect(action('start')?.disabled).toBe(true);
-    expect(text('[data-role="count"]')).toContain('0 selected');
+    expect(checkboxes().every((input) => input.checked)).toBe(true);
+    expect(action('start')?.disabled).toBe(false);
+    expect(text('[data-role="count"]')).toContain('2 selected');
     expect(dialogOf().textContent).toContain('/a');
     expect(list?.querySelector('[title="https://docs.test/a"]')).not.toBeNull();
     expect(css()).toMatch(/\[data-role="list"\][^{]*\{[^}]*overflow: ?auto/);
@@ -175,21 +175,22 @@ describe('selection dialog presentation', () => {
     void open();
 
     action('invert-selection')?.click();
-    expect(checkboxes().every((input) => input.checked)).toBe(true);
-    expect(text('[data-role="count"]')).toContain('2 selected');
-    expect(action('start')?.disabled).toBe(false);
+    expect(checkboxes().every((input) => !input.checked)).toBe(true);
+    expect(text('[data-role="count"]')).toContain('0 selected');
+    expect(action('start')?.disabled).toBe(true);
 
     action('invert-selection')?.click();
-    expect(checkboxes().some((input) => input.checked)).toBe(false);
-    expect(action('start')?.disabled).toBe(true);
+    expect(checkboxes().every((input) => input.checked)).toBe(true);
+    expect(action('start')?.disabled).toBe(false);
 
     checkboxes().at(0)?.click();
     action('invert-selection')?.click();
-    expect(checkboxes().map((input) => input.checked)).toEqual([false, true]);
+    expect(checkboxes().map((input) => input.checked)).toEqual([true, false]);
   });
 
   it('should select every link with Select all', () => {
     void open();
+    checkboxes().at(0)?.click();
     action('select-all')?.click();
 
     expect(checkboxes().every((input) => input.checked)).toBe(true);
@@ -226,7 +227,7 @@ describe('selection dialog presentation', () => {
 
     checkboxes().at(0)?.click();
     action('start')?.click();
-    await expect(pending).resolves.toEqual([links.at(0)]);
+    await expect(pending).resolves.toEqual([links.at(1)]);
   });
 
   it('should resolve null when dismissed with Escape', async () => {
@@ -240,6 +241,8 @@ describe('selection dialog presentation', () => {
 
   it('should resolve selected links in discovery order', async () => {
     const pending = open();
+    checkboxes().at(0)?.click();
+    checkboxes().at(1)?.click();
     checkboxes().at(1)?.click();
     checkboxes().at(0)?.click();
     action('start')?.click();
@@ -249,10 +252,94 @@ describe('selection dialog presentation', () => {
 
   it('should round-trip the numeric id through the checkbox value', async () => {
     const pending = open();
-    checkboxes().at(1)?.click();
+    checkboxes().at(0)?.click();
     action('start')?.click();
 
     await expect(pending).resolves.toEqual([links.at(1)]);
     expect(document.querySelector('[data-web-printer-dialog-host]')).toBeNull();
+  });
+
+  it('should not render the refine row without a refine option', () => {
+    void open();
+
+    expect(action('apply-selector')).toBeNull();
+    expect(rootOf().querySelector('[data-role="selector"]')).toBeNull();
+  });
+
+  it('should re-discover links with the applied selector and keep selections by url', async () => {
+    const rediscovered = [
+      { id: 0, url: 'https://docs.test/b', label: 'B', path: '/b' },
+      { id: 1, url: 'https://docs.test/c', label: 'C', path: '/c' },
+    ];
+    const rediscover = vi.fn(() => rediscovered);
+    const pending = createLinkSelector(document).select(links, {
+      selector: 'nav a',
+      rediscover,
+    });
+    const input = rootOf().querySelector<HTMLInputElement>(
+      '[data-role="selector"]'
+    );
+
+    expect(input?.value).toBe('nav a');
+
+    checkboxes().at(0)?.click();
+    if (input) {
+      input.value = '.toc a';
+    }
+    action('apply-selector')?.click();
+
+    expect(rediscover).toHaveBeenCalledWith('.toc a');
+    expect(text('[data-role="hint"]')).toBe('');
+    expect(dialogOf().textContent).toContain('/c');
+    expect(dialogOf().textContent).not.toContain('/a');
+    expect(checkboxes().map((element) => element.checked)).toEqual([
+      true,
+      false,
+    ]);
+    expect(text('[data-role="count"]')).toContain('1 selected');
+
+    action('start')?.click();
+    await expect(pending).resolves.toEqual([rediscovered.at(0)]);
+  });
+
+  it('should report an invalid selector and keep the current list', () => {
+    const rediscover = vi.fn(() => {
+      throw new Error('SyntaxError');
+    });
+    void createLinkSelector(document).select(links, {
+      selector: '',
+      rediscover,
+    });
+    const input = rootOf().querySelector<HTMLInputElement>(
+      '[data-role="selector"]'
+    );
+    if (input) {
+      input.value = '???';
+    }
+    action('apply-selector')?.click();
+
+    expect(text('[data-role="hint"]')).toContain('Invalid selector');
+    expect(checkboxes()).toHaveLength(2);
+  });
+
+  it('should keep the current list when the selector matches nothing', () => {
+    const rediscover = vi.fn(() => []);
+    void createLinkSelector(document).select(links, {
+      selector: '',
+      rediscover,
+    });
+    const input = rootOf().querySelector<HTMLInputElement>(
+      '[data-role="selector"]'
+    );
+    if (input) {
+      input.value = '.missing a';
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
+      );
+    }
+
+    expect(rediscover).toHaveBeenCalledWith('.missing a');
+    expect(text('[data-role="hint"]')).toContain('No links match');
+    expect(checkboxes()).toHaveLength(2);
   });
 });

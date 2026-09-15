@@ -1,4 +1,5 @@
 import type { Post, PrintDocument } from '../entity';
+import { button } from './dom';
 
 type Popup = Pick<
   Window,
@@ -13,6 +14,13 @@ type Popup = Pick<
 >;
 type OpenWindow = () => Popup | null;
 
+type PreviewOptions = {
+  readonly taskId: string;
+  readonly title: string;
+  readonly onCancel: () => void;
+  readonly open?: OpenWindow;
+};
+
 type PreviewProgress = {
   readonly completed: number;
   readonly total: number;
@@ -24,6 +32,7 @@ interface Preview {
 }
 
 const css = `
+  html{scroll-behavior:smooth}
   :root{--wp-bg:#fff;--wp-fg:#181818;--wp-muted:#555;--wp-line:#ccc;--wp-surface:#f5f5f5}
   body{max-width:52rem;margin:0 auto;padding:2rem;font:16px/1.6 system-ui,sans-serif;background:var(--wp-bg);color:var(--wp-fg)}
   nav{position:sticky;top:0;display:flex;align-items:center;justify-content:flex-end;gap:.5rem;padding:.75rem;background:var(--wp-bg);border-bottom:1px solid var(--wp-line)}
@@ -37,21 +46,9 @@ const css = `
   @media print{:root{color-scheme:light}nav,aside{display:none}body{max-width:none;padding:0;background:#fff;color:#000}}
 `;
 
-const action = (
-  page: Document,
-  name: string,
-  label: string
-): HTMLButtonElement => {
-  const element = page.createElement('button');
-  element.type = 'button';
-  element.setAttribute('data-action', name);
-  element.textContent = label;
-
-  return element;
-};
-
 const renderPost = (page: Document, post: Post, index: number): HTMLElement => {
   const element = page.createElement('article');
+  element.id = `post-${index}`;
   if (index > 0) {
     element.classList.add('break');
   }
@@ -96,8 +93,8 @@ const renderOutput = (
 ): void => {
   const page = popup.document;
   page.title = output.title;
-  const print = action(page, 'print', 'Print');
-  const close = action(page, 'close', 'Close');
+  const print = button(page, 'print', 'Print');
+  const close = button(page, 'close', 'Close');
   print.addEventListener('click', () => popup.print());
   close.addEventListener('click', () => popup.close());
   nav.replaceChildren(print, close);
@@ -113,6 +110,16 @@ const summary = (page: Document, posts: readonly Post[]): HTMLElement => {
     post.type === 'failure' ? [post] : []
   );
   aside.textContent = `${posts.length - failures.length} succeeded, ${failures.length} failed`;
+  const toc = page.createElement('ol');
+  for (const [index, post] of posts.entries()) {
+    const item = page.createElement('li');
+    const anchor = page.createElement('a');
+    anchor.href = `#post-${index}`;
+    anchor.textContent = post.type === 'success' ? post.title : post.link.label;
+    item.append(anchor);
+    toc.append(item);
+  }
+  aside.append(toc);
   for (const failure of failures) {
     const line = page.createElement('p');
     line.textContent = `${failure.link.label}: ${failure.reason} (${failure.link.url})`;
@@ -122,48 +129,67 @@ const summary = (page: Document, posts: readonly Post[]): HTMLElement => {
   return aside;
 };
 
-export const openPreview = (
-  open: OpenWindow = () => window.open('', '_blank'),
-  taskId: string,
-  title: string,
-  onCancel: () => void
-): Preview | null => {
+const mount = (
+  page: Document
+): {
+  root: HTMLElement;
+  status: HTMLElement;
+  cancel: HTMLButtonElement;
+  nav: HTMLElement;
+} => {
+  const root = page.createElement('main');
+  const status = page.createElement('p');
+  const cancel = button(page, 'cancel', 'Cancel');
+  const nav = page.createElement('nav');
+  const style = page.createElement('style');
+  style.textContent = css;
+  status.textContent = 'Preparing…';
+  nav.append(status, cancel);
+  page.head.append(style);
+  page.body.replaceChildren(nav, root);
+
+  return { root, status, cancel, nav };
+};
+
+export const openPreview = ({
+  open = () => window.open('', '_blank'),
+  taskId,
+  title,
+  onCancel,
+}: PreviewOptions): Preview | null => {
   const popup = open();
   if (!popup) {
     return null;
   }
 
-  const page = Object.assign(popup.document, { title });
-  const root = page.createElement('main');
-  const status = page.createElement('p');
-  const cancel = action(page, 'cancel', 'Cancel');
-  const nav = page.createElement('nav');
-  const style = page.createElement('style');
+  const page = popup.document;
+  page.title = title;
+  const { root, status, cancel, nav } = mount(page);
   let settled = false;
-  const teardown = (): void => {
+  const settle = (): boolean => {
     if (settled) {
-      return;
+      return false;
     }
-
     settled = true;
     window.removeEventListener('message', message);
     popup.removeEventListener('pagehide', onPageHide);
-    popup.close();
-    onCancel();
+
+    return true;
+  };
+  const teardown = (): void => {
+    if (settle()) {
+      popup.close();
+      onCancel();
+    }
   };
   const message = receiveCancel(popup, taskId, teardown);
   const onPageHide = (): void => teardown();
 
-  style.textContent = css;
-  status.textContent = 'Preparing…';
   cancel.addEventListener('click', () => {
     popup.opener?.postMessage({ type: 'web-printer:cancel', taskId }, '*');
   });
   window.addEventListener('message', message);
   popup.addEventListener('pagehide', onPageHide);
-  nav.append(status, cancel);
-  page.head.append(style);
-  page.body.replaceChildren(nav, root);
 
   return {
     update: (progress) => {
@@ -172,14 +198,10 @@ export const openPreview = (
       }
     },
     render: (output) => {
-      if (settled) {
+      if (!settle()) {
         return;
       }
-
       renderOutput(popup, nav, root, output);
-      settled = true;
-      window.removeEventListener('message', message);
-      popup.removeEventListener('pagehide', onPageHide);
     },
   };
 };
